@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SVIZ</title>
+<style>
+html, body { margin: 0; height: 100%; background: #101216; color: #e9edf2; font: 14px/1.4 system-ui, sans-serif; }
+body { overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; }
+.panel { position: fixed; left: 16px; top: 16px; width: 300px; background: #191d24; border: 1px solid #303742; border-radius: 6px; padding: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+.grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+label { display: grid; gap: 4px; color: #aeb8c5; font-size: 12px; }
+input { min-width: 0; background: #0f1217; border: 1px solid #3a4350; border-radius: 4px; color: #f5f7fa; padding: 7px 8px; font: inherit; }
+button { width: 100%; margin-top: 10px; border: 0; border-radius: 4px; padding: 9px 10px; background: #2f80ed; color: white; font-weight: 600; cursor: pointer; }
+button:disabled { background: #536170; cursor: wait; }
+.status { margin-top: 9px; color: #c7d0dc; font-size: 12px; min-height: 34px; }
+h1 { margin: 0 0 10px; font-size: 15px; font-weight: 700; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<form class="panel" id="controls">
+  <h1>SVIZ Hex8 Cube</h1>
+  <div class="grid">
+    <label>nx<input id="nx" inputmode="numeric" value="4"></label>
+    <label>ny<input id="ny" inputmode="numeric" value="4"></label>
+    <label>nz<input id="nz" inputmode="numeric" value="4"></label>
+    <label>size x<input id="sx" inputmode="decimal" value="1"></label>
+    <label>size y<input id="sy" inputmode="decimal" value="1"></label>
+    <label>size z<input id="sz" inputmode="decimal" value="1"></label>
+  </div>
+  <button id="generate" type="submit" disabled>Generate</button>
+  <div class="status" id="status">Loading WebAssembly...</div>
+</form>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -61,9 +61,15 @@ compile_commands.json
 # vcpkg
 vcpkg_installed/
 
+# repo-local toolchains
+.tools/
+
 # debug information files
 *.dwo
 
 # test output & cache
 Testing/
 .cache/
+
+# smesh tracing output
+smesh.trace.csv

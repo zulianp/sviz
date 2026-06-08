@@ -1,0 +1,3 @@
+[submodule "external/sfem"]
+	path = external/sfem
+	url = https://github.com/zulianp/sfem.git
