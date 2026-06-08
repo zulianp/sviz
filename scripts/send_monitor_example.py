@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import json
 import socket
 import struct
 import sys
@@ -42,32 +43,36 @@ def main():
     vector_offset = quad_offset + len(quad_bytes)
     payload = point_bytes + quad_bytes + vector_bytes
 
-    header = f"""sviz_protocol: 1
-kind: monitor
-name: quad-vector-example
-endianness: little
-binary_bytes: {len(payload)}
-vector_scale: 0.35
-points:
-  dtype: float32
-  components: 3
-  count: {len(points) // 3}
-  offset: 0
-quads:
-  dtype: uint32
-  components: 4
-  count: {len(quads) // 4}
-  offset: {quad_offset}
-vectors:
-  dtype: float32
-  components: 6
-  count: {len(vectors) // 6}
-  offset: {vector_offset}
-...
-""".encode("utf-8")
+    header = {
+        "sviz_protocol": 1,
+        "kind": "monitor",
+        "name": "quad-vector-example",
+        "endianness": "little",
+        "binary_bytes": len(payload),
+        "vector_scale": 0.35,
+        "points": {
+            "dtype": "float32",
+            "components": 3,
+            "count": len(points) // 3,
+            "offset": 0,
+        },
+        "quads": {
+            "dtype": "uint32",
+            "components": 4,
+            "count": len(quads) // 4,
+            "offset": quad_offset,
+        },
+        "vectors": {
+            "dtype": "float32",
+            "components": 6,
+            "count": len(vectors) // 6,
+            "offset": vector_offset,
+        },
+    }
+    header_bytes = (json.dumps(header, separators=(",", ":")) + "\n").encode("utf-8")
 
     with socket.create_connection((host, port), timeout=5.0) as sock:
-        sock.sendall(header)
+        sock.sendall(header_bytes)
         sock.sendall(payload)
 
     print(

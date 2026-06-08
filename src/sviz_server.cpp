@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -186,59 +187,38 @@ std::string route_to_file(const std::string &path) {
   return "";
 }
 
-std::size_t yaml_message_end(const std::vector<char> &buffer) {
-  const std::string marker = "\n...\n";
-  if (buffer.size() < marker.size()) {
+std::size_t json_header_end(const std::vector<char> &buffer) {
+  const auto it = std::find(buffer.begin(), buffer.end(), '\n');
+  if (it == buffer.end()) {
     return std::string::npos;
   }
-
-  for (std::size_t i = 0; i + marker.size() <= buffer.size(); ++i) {
-    bool found = true;
-    for (std::size_t j = 0; j < marker.size(); ++j) {
-      if (buffer[i + j] != marker[j]) {
-        found = false;
-        break;
-      }
-    }
-    if (found) {
-      return i + marker.size();
-    }
-  }
-
-  if (buffer.size() >= 4 && buffer[0] == '.' && buffer[1] == '.' &&
-      buffer[2] == '.' && buffer[3] == '\n') {
-    return 4;
-  }
-  return std::string::npos;
-}
-
-std::string trim_copy(std::string value) {
-  while (!value.empty() && (value.back() == '\r' || value.back() == '\n' ||
-                            value.back() == ' ' || value.back() == '\t')) {
-    value.pop_back();
-  }
-  std::size_t first = 0;
-  while (first < value.size() &&
-         (value[first] == ' ' || value[first] == '\t')) {
-    ++first;
-  }
-  return value.substr(first);
+  return static_cast<std::size_t>(std::distance(buffer.begin(), it)) + 1;
 }
 
 std::uint64_t parse_binary_bytes(const std::string &header) {
-  std::istringstream lines(header);
-  std::string line;
-  while (std::getline(lines, line)) {
-    const auto colon = line.find(':');
-    if (colon == std::string::npos) {
-      continue;
-    }
-    const std::string key = trim_copy(line.substr(0, colon));
-    if (key == "binary_bytes") {
-      return std::stoull(trim_copy(line.substr(colon + 1)));
-    }
+  const auto key = header.find("\"binary_bytes\"");
+  if (key == std::string::npos) {
+    throw std::runtime_error("monitor JSON header missing binary_bytes");
   }
-  throw std::runtime_error("monitor header missing binary_bytes");
+  const auto colon = header.find(':', key);
+  if (colon == std::string::npos) {
+    throw std::runtime_error("monitor JSON header has invalid binary_bytes");
+  }
+  std::size_t first_digit = colon + 1;
+  while (first_digit < header.size() &&
+         (header[first_digit] == ' ' || header[first_digit] == '\t')) {
+    ++first_digit;
+  }
+  if (first_digit == header.size() ||
+      !std::isdigit(static_cast<unsigned char>(header[first_digit]))) {
+    throw std::runtime_error("monitor JSON header has invalid binary_bytes");
+  }
+  std::size_t end = first_digit;
+  while (end < header.size() &&
+         std::isdigit(static_cast<unsigned char>(header[end]))) {
+    ++end;
+  }
+  return std::stoull(header.substr(first_digit, end - first_digit));
 }
 
 bool recv_more(int fd, std::vector<char> &buffer) {
@@ -258,12 +238,12 @@ void handle_monitor_ingest(int fd) {
     while (header_bytes == std::string::npos) {
       if (!recv_more(fd, buffer)) {
         throw std::runtime_error(
-            "monitor sender closed before YAML header end");
+            "monitor sender closed before JSON header end");
       }
       if (buffer.size() > 1024 * 1024) {
-        throw std::runtime_error("monitor YAML header exceeds 1 MiB");
+        throw std::runtime_error("monitor JSON header exceeds 1 MiB");
       }
-      header_bytes = yaml_message_end(buffer);
+      header_bytes = json_header_end(buffer);
     }
 
     const std::string header(buffer.data(), buffer.data() + header_bytes);

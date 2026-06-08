@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SVIZ Monitor</title>
+<style>
+html, body { margin: 0; height: 100%; background: #101216; color: #e9edf2; font: 14px/1.4 system-ui, sans-serif; }
+body { overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+.panel { position: fixed; left: 16px; top: 16px; width: 300px; background: #191d24; border: 1px solid #303742; border-radius: 6px; padding: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+.tools { display: grid; grid-template-columns: 1fr 1fr 64px; gap: 8px; margin-top: 10px; }
+button { width: 100%; margin-top: 10px; border: 0; border-radius: 4px; padding: 9px 10px; background: #2f80ed; color: white; font-weight: 600; cursor: pointer; }
+.tools button { margin-top: 0; background: #28313d; color: #dce5ef; }
+.tools button.active { background: #2f80ed; color: #fff; }
+.status { margin-top: 9px; color: #c7d0dc; font-size: 12px; min-height: 34px; }
+h1 { margin: 0 0 10px; font-size: 15px; font-weight: 700; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<section class="panel" id="controls">
+  <h1>SVIZ Monitor</h1>
+  <button id="refreshMonitor" type="button">Refresh</button>
+  <div class="tools" aria-label="View controls">
+    <button id="rotateMode" type="button" class="active">Rotate</button>
+    <button id="panMode" type="button">Pan</button>
+    <button id="resetView" type="button">Reset</button>
+  </div>
+  <div class="status" id="status">Waiting for monitor data...</div>
+</section>
+<script type="module" src="/monitor.js"></script>
+</body>
+</html>
