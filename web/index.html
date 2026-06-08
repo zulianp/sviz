@@ -7,30 +7,51 @@
 <style>
 html, body { margin: 0; height: 100%; background: #101216; color: #e9edf2; font: 14px/1.4 system-ui, sans-serif; }
 body { overflow: hidden; }
-canvas { display: block; width: 100vw; height: 100vh; }
+canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
 .panel { position: fixed; left: 16px; top: 16px; width: 300px; background: #191d24; border: 1px solid #303742; border-radius: 6px; padding: 12px; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
 .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.tools { display: grid; grid-template-columns: 1fr 1fr 64px; gap: 8px; margin-top: 10px; }
 label { display: grid; gap: 4px; color: #aeb8c5; font-size: 12px; }
 input { min-width: 0; background: #0f1217; border: 1px solid #3a4350; border-radius: 4px; color: #f5f7fa; padding: 7px 8px; font: inherit; }
 button { width: 100%; margin-top: 10px; border: 0; border-radius: 4px; padding: 9px 10px; background: #2f80ed; color: white; font-weight: 600; cursor: pointer; }
+.tabs button { margin-top: 0; background: #28313d; color: #dce5ef; }
+.tabs button.active { background: #2f80ed; color: #fff; }
+.tools button { margin-top: 0; background: #28313d; color: #dce5ef; }
+.tools button.active { background: #2f80ed; color: #fff; }
 button:disabled { background: #536170; cursor: wait; }
 .status { margin-top: 9px; color: #c7d0dc; font-size: 12px; min-height: 34px; }
 h1 { margin: 0 0 10px; font-size: 15px; font-weight: 700; }
+.hidden { display: none; }
 </style>
 </head>
 <body>
 <canvas id="view"></canvas>
 <form class="panel" id="controls">
   <h1>SVIZ Hex8 Cube</h1>
-  <div class="grid">
-    <label>nx<input id="nx" inputmode="numeric" value="4"></label>
-    <label>ny<input id="ny" inputmode="numeric" value="4"></label>
-    <label>nz<input id="nz" inputmode="numeric" value="4"></label>
-    <label>size x<input id="sx" inputmode="decimal" value="1"></label>
-    <label>size y<input id="sy" inputmode="decimal" value="1"></label>
-    <label>size z<input id="sz" inputmode="decimal" value="1"></label>
+  <div class="tabs" aria-label="Views">
+    <button id="cubeView" type="button" class="active">Cube</button>
+    <button id="monitorView" type="button">Monitor</button>
   </div>
-  <button id="generate" type="submit" disabled>Generate</button>
+  <div id="cubeControls">
+    <div class="grid">
+      <label>nx<input id="nx" inputmode="numeric" value="4"></label>
+      <label>ny<input id="ny" inputmode="numeric" value="4"></label>
+      <label>nz<input id="nz" inputmode="numeric" value="4"></label>
+      <label>size x<input id="sx" inputmode="decimal" value="1"></label>
+      <label>size y<input id="sy" inputmode="decimal" value="1"></label>
+      <label>size z<input id="sz" inputmode="decimal" value="1"></label>
+    </div>
+    <button id="generate" type="submit" disabled>Generate</button>
+  </div>
+  <div id="monitorControls" class="hidden">
+    <button id="refreshMonitor" type="button">Refresh</button>
+  </div>
+  <div class="tools" aria-label="View controls">
+    <button id="rotateMode" type="button" class="active">Rotate</button>
+    <button id="panMode" type="button">Pan</button>
+    <button id="resetView" type="button">Reset</button>
+  </div>
   <div class="status" id="status">Loading WebAssembly...</div>
 </form>
 <script type="module" src="/app.js"></script>

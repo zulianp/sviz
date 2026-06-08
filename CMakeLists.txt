@@ -30,7 +30,9 @@ if(EMSCRIPTEN)
         "-sALLOW_MEMORY_GROWTH=1"
     )
 elseif(SVIZ_BUILD_SERVER)
+    find_package(Threads REQUIRED)
     add_executable(sviz_server src/sviz_server.cpp)
+    target_link_libraries(sviz_server PRIVATE Threads::Threads)
 
     add_custom_target(sviz_web_assets
         COMMAND ${CMAKE_COMMAND} -E copy_directory
