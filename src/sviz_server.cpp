@@ -1,8 +1,8 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -35,6 +35,7 @@ struct MonitorSnapshot {
 std::vector<std::filesystem::path> g_asset_roots;
 std::mutex g_monitor_mutex;
 MonitorSnapshot g_monitor;
+int g_monitor_port = 0;
 
 std::string read_file(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
@@ -161,11 +162,20 @@ std::string route_to_file(const std::string &path) {
   if (path == "/") {
     return "web/index.html";
   }
-  if (path == "/monitor") {
-    return "web/index.html";
+  if (path == "/monitor" || path == "/monitor/") {
+    return "web/monitor.html";
+  }
+  if (path == "/monitor.html") {
+    return "web/monitor.html";
   }
   if (path == "/app.js") {
     return "web/app.js";
+  }
+  if (path == "/monitor.js") {
+    return "web/monitor.js";
+  }
+  if (path == "/viewer.js") {
+    return "web/viewer.js";
   }
   if (path == "/wasm/sviz_wasm.js") {
     return "build-wasm/sviz_wasm.js";
@@ -203,9 +213,8 @@ std::size_t yaml_message_end(const std::vector<char> &buffer) {
 }
 
 std::string trim_copy(std::string value) {
-  while (!value.empty() &&
-         (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' ||
-          value.back() == '\t')) {
+  while (!value.empty() && (value.back() == '\r' || value.back() == '\n' ||
+                            value.back() == ' ' || value.back() == '\t')) {
     value.pop_back();
   }
   std::size_t first = 0;
@@ -248,7 +257,8 @@ void handle_monitor_ingest(int fd) {
     std::size_t header_bytes = std::string::npos;
     while (header_bytes == std::string::npos) {
       if (!recv_more(fd, buffer)) {
-        throw std::runtime_error("monitor sender closed before YAML header end");
+        throw std::runtime_error(
+            "monitor sender closed before YAML header end");
       }
       if (buffer.size() > 1024 * 1024) {
         throw std::runtime_error("monitor YAML header exceeds 1 MiB");
@@ -264,14 +274,17 @@ void handle_monitor_ingest(int fd) {
 
     while (buffer.size() < header_bytes + payload_bytes) {
       if (!recv_more(fd, buffer)) {
-        throw std::runtime_error("monitor sender closed before binary payload end");
+        throw std::runtime_error(
+            "monitor sender closed before binary payload end");
       }
     }
 
     MonitorSnapshot next;
     next.header = header;
-    next.payload.assign(buffer.begin() + static_cast<std::ptrdiff_t>(header_bytes),
-                        buffer.begin() + static_cast<std::ptrdiff_t>(header_bytes + payload_bytes));
+    next.payload.assign(
+        buffer.begin() + static_cast<std::ptrdiff_t>(header_bytes),
+        buffer.begin() +
+            static_cast<std::ptrdiff_t>(header_bytes + payload_bytes));
     {
       std::lock_guard<std::mutex> lock(g_monitor_mutex);
       next.version = g_monitor.version + 1;
@@ -303,6 +316,21 @@ void respond_monitor_snapshot(int fd) {
   respond(fd, 200, "OK", "application/octet-stream", body);
 }
 
+void respond_monitor_info(int fd) {
+  std::uint64_t version = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_monitor_mutex);
+    version = g_monitor.version;
+  }
+
+  std::ostringstream body;
+  body << "{"
+       << "\"version\":" << version << ","
+       << "\"ingest_host\":\"127.0.0.1\","
+       << "\"ingest_port\":" << g_monitor_port << "}\n";
+  respond(fd, 200, "OK", "application/json; charset=utf-8", body.str());
+}
+
 void handle_request(int fd, const Request &req) {
   if (req.method != "GET") {
     respond(fd, 405, "Method Not Allowed", "text/plain; charset=utf-8",
@@ -312,6 +340,10 @@ void handle_request(int fd, const Request &req) {
 
   if (req.path == "/monitor.bin") {
     respond_monitor_snapshot(fd);
+    return;
+  }
+  if (req.path == "/monitor-info.json") {
+    respond_monitor_info(fd);
     return;
   }
 
@@ -363,6 +395,7 @@ int main(int argc, char **argv) {
   const int monitor_port = argc > 2 ? std::atoi(argv[2]) : port + 1;
   try {
     init_asset_roots(argv[0]);
+    g_monitor_port = monitor_port;
     const int server = listen_socket(port);
     const int monitor_server = listen_socket(monitor_port);
     std::cout << "SVIZ server listening on http://127.0.0.1:" << port << "\n";
@@ -387,8 +420,8 @@ int main(int argc, char **argv) {
       if (FD_ISSET(server, &readfds)) {
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
-        const int client =
-            ::accept(server, reinterpret_cast<sockaddr *>(&client_addr), &client_len);
+        const int client = ::accept(
+            server, reinterpret_cast<sockaddr *>(&client_addr), &client_len);
         if (client >= 0) {
           try {
             handle_request(client, read_request(client));
@@ -403,8 +436,9 @@ int main(int argc, char **argv) {
       if (FD_ISSET(monitor_server, &readfds)) {
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
-        const int client = ::accept(
-            monitor_server, reinterpret_cast<sockaddr *>(&client_addr), &client_len);
+        const int client =
+            ::accept(monitor_server, reinterpret_cast<sockaddr *>(&client_addr),
+                     &client_len);
         if (client >= 0) {
           std::thread(handle_monitor_ingest, client).detach();
         }

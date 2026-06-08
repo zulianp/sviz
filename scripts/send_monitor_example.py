@@ -15,7 +15,7 @@ def pack_u32(values):
 
 def main():
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8082
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8081
 
     nx = 5
     ny = 4

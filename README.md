@@ -27,9 +27,10 @@ Run the server:
 ./build/sviz_server 8080 8081
 ```
 
-Open `http://127.0.0.1:8080`. The server serves the browser client,
-and the generated WASM artifacts from `build-wasm/`. Mesh generation happens in
-the browser through `smesh::Mesh` compiled to WebAssembly.
+Open `http://127.0.0.1:8080` for the cube generator, or
+`http://127.0.0.1:8080/monitor` for the monitor app. The server serves the
+browser clients and the generated WASM artifacts from `build-wasm/`. Mesh
+generation happens in the browser through `smesh::Mesh` compiled to WebAssembly.
 
 The first port is HTTP. The second port is the monitor ingest socket. If the
 second port is omitted, the server uses `http_port + 1`.
@@ -92,5 +93,11 @@ Send the included quadrilateral/vector example:
 ./scripts/send_monitor_example.py 127.0.0.1 8081
 ```
 
-Then open the Monitor view in the browser. The server exposes the latest
-snapshot to the web client at `/monitor.bin`.
+With the default server ports, the same command can be shortened to:
+
+```sh
+./scripts/send_monitor_example.py
+```
+
+Then open `http://127.0.0.1:8080/monitor` in the browser. The server exposes the
+latest snapshot to the web client at `/monitor.bin`.
