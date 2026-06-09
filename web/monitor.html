@@ -27,9 +27,14 @@ details + details { margin-top: 4px; }
 summary { cursor: pointer; color: #f1f5f9; font-weight: 650; padding: 7px 8px; border-radius: 4px; list-style-position: inside; }
 summary:hover { background: #222935; }
 .message-list { display: grid; gap: 3px; padding: 2px 0 8px 18px; }
+.group-actions { padding: 0 0 6px 18px; }
+.group-actions button { padding: 7px 8px; font-size: 12px; }
+.message-row { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 4px; align-items: stretch; }
 .message-item { background: transparent; color: #cbd5e1; text-align: left; font-weight: 500; padding: 6px 8px; border-radius: 4px; }
 .message-item:hover { background: #242c38; }
 .message-item.active { background: #2f80ed; color: #fff; }
+.visibility-button { background: #28313d; color: #dce5ef; padding: 6px 6px; font-size: 12px; font-weight: 650; }
+.visibility-button.visible { background: #1f7a4d; color: #fff; }
 .empty { color: #8792a2; padding: 10px 8px; font-size: 12px; }
 @media (max-width: 760px) {
   .layout { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; }

@@ -14,6 +14,12 @@ let monitorInfo = null;
 let selectedMessageId = null;
 let selectedLatest = true;
 let messageListVersion = -1;
+let currentMessages = [];
+let visibleMessageIds = new Set();
+let snapshotCache = new Map();
+let playingAnimation = null;
+
+const ANIMATION_INTERVAL_MS = 300;
 
 function findJsonHeaderEnd(bytes) {
   const newline = bytes.indexOf(10);
@@ -123,6 +129,17 @@ function concatFloat32Arrays(a, b) {
   return out;
 }
 
+function offsetUint32Array(values, offset) {
+  if (!values || values.length === 0 || offset === 0) {
+    return values || new Uint32Array(0);
+  }
+  const out = new Uint32Array(values.length);
+  for (let i = 0; i < values.length; ++i) {
+    out[i] = values[i] + offset;
+  }
+  return out;
+}
+
 function aabbVertices(aabbs) {
   const vertices = new Float32Array((aabbs.length / 6) * 8 * 3);
   for (let i = 0, out = 0; i < aabbs.length; i += 6) {
@@ -200,7 +217,7 @@ function vectorSegments(vectors, scale) {
   return segments;
 }
 
-function bindMonitorSnapshot(buffer, label = 'monitor socket') {
+function decodeMonitorSnapshot(buffer, label = 'monitor socket') {
   const bytes = new Uint8Array(buffer);
   const jsonEnd = findJsonHeaderEnd(bytes);
   const headerText = new TextDecoder().decode(bytes.subarray(0, jsonEnd.textEnd));
@@ -235,50 +252,161 @@ function bindMonitorSnapshot(buffer, label = 'monitor socket') {
     ? typedPayloadView(Float32Array, bytes, jsonEnd.headerEnd, header.vectors)
     : null;
   const vectorScale = Number(header.vector_scale || 1);
-  viewer.bindRenderMesh({
-    vertices,
-    triangles: quadTriangles(quads),
-    edges,
-    vectors: vectors ? vectorSegments(vectors, vectorScale) : null
-  });
+  const triangles = quadTriangles(quads);
+  const vectorSegmentsData = vectors ? vectorSegments(vectors, vectorScale) : null;
 
   const quadCount = header.quads ? Number(header.quads.count) : 0;
   const hexaCount = header.hexas ? Number(header.hexas.count) : 0;
   const aabbCount = header.aabbs ? Number(header.aabbs.count) : 0;
   const boundaryQuadCount = Math.floor(quads.length / 4);
   const vectorCount = vectors ? Math.floor(vectors.length / 6) : 0;
-  statusEl.textContent =
-    `${points.length / 3} points, ${quadCount} quads, ${hexaCount} hexas, ${aabbCount} AABBs, ${boundaryQuadCount} rendered faces, ${vectorCount} vectors from ${label}`;
+  return {
+    label,
+    header,
+    vertices,
+    triangles,
+    edges,
+    vectors: vectorSegmentsData,
+    counts: {
+      points: Math.floor(points.length / 3),
+      quads: quadCount,
+      hexas: hexaCount,
+      aabbs: aabbCount,
+      renderedFaces: boundaryQuadCount,
+      vectors: vectorCount
+    }
+  };
 }
 
-async function loadSnapshot(id = null) {
-  try {
-    const params = new URLSearchParams({ ts: String(Date.now()) });
-    if (id !== null) {
-      params.set('id', String(id));
+function composeGeometries(geometries) {
+  let vertexItems = 0;
+  let triangleItems = 0;
+  let edgeItems = 0;
+  let vectorItems = 0;
+  for (const geometry of geometries) {
+    vertexItems += geometry.vertices.length;
+    triangleItems += geometry.triangles.length;
+    edgeItems += geometry.edges.length;
+    vectorItems += geometry.vectors ? geometry.vectors.length : 0;
+  }
+
+  const vertices = new Float32Array(vertexItems);
+  const triangles = new Uint32Array(triangleItems);
+  const edges = new Uint32Array(edgeItems);
+  const vectors = vectorItems > 0 ? new Float32Array(vectorItems) : null;
+
+  let vertexOffset = 0;
+  let vertexIndexOffset = 0;
+  let triangleOffset = 0;
+  let edgeOffset = 0;
+  let vectorOffset = 0;
+  for (const geometry of geometries) {
+    vertices.set(geometry.vertices, vertexOffset);
+    const shiftedTriangles = offsetUint32Array(geometry.triangles, vertexIndexOffset);
+    const shiftedEdges = offsetUint32Array(geometry.edges, vertexIndexOffset);
+    triangles.set(shiftedTriangles, triangleOffset);
+    edges.set(shiftedEdges, edgeOffset);
+    if (vectors && geometry.vectors) {
+      vectors.set(geometry.vectors, vectorOffset);
+      vectorOffset += geometry.vectors.length;
     }
-    const response = await fetch('/monitor.bin?' + params.toString());
-    if (response.status === 204) {
-      const info = await fetchMonitorInfo();
-      statusEl.textContent =
-        `No monitor data received. Send snapshots to ${info.ingest_host}:${info.ingest_port}.`;
+    vertexOffset += geometry.vertices.length;
+    vertexIndexOffset += Math.floor(geometry.vertices.length / 3);
+    triangleOffset += geometry.triangles.length;
+    edgeOffset += geometry.edges.length;
+  }
+
+  return { vertices, triangles, edges, vectors };
+}
+
+function composeCounts(geometries) {
+  const counts = {
+    points: 0,
+    quads: 0,
+    hexas: 0,
+    aabbs: 0,
+    renderedFaces: 0,
+    vectors: 0
+  };
+  for (const geometry of geometries) {
+    counts.points += geometry.counts.points;
+    counts.quads += geometry.counts.quads;
+    counts.hexas += geometry.counts.hexas;
+    counts.aabbs += geometry.counts.aabbs;
+    counts.renderedFaces += geometry.counts.renderedFaces;
+    counts.vectors += geometry.counts.vectors;
+  }
+  return counts;
+}
+
+async function fetchSnapshotGeometry(id) {
+  const numericId = Number(id);
+  if (snapshotCache.has(numericId)) {
+    return snapshotCache.get(numericId);
+  }
+  const params = new URLSearchParams({ id: String(numericId), ts: String(Date.now()) });
+  const response = await fetch('/monitor.bin?' + params.toString());
+  if (!response.ok) {
+    throw new Error(`monitor fetch failed with HTTP ${response.status}`);
+  }
+  const geometry = decodeMonitorSnapshot(await response.arrayBuffer(), `snapshot ${numericId}`);
+  snapshotCache.set(numericId, geometry);
+  return geometry;
+}
+
+function visibleMessagesInOrder(messages) {
+  return messages
+    .filter(message => visibleMessageIds.has(Number(message.id)))
+    .sort((a, b) => Number(a.sequence) - Number(b.sequence));
+}
+
+async function renderVisibleMessages(messages = currentMessages) {
+  try {
+    const visibleMessages = visibleMessagesInOrder(messages);
+    if (visibleMessages.length === 0) {
+      viewer.clear();
+      statusEl.textContent = messages.length === 0
+        ? 'No retained messages'
+        : 'No visible messages';
       return;
     }
-    if (!response.ok) {
-      throw new Error(`monitor fetch failed with HTTP ${response.status}`);
+
+    const geometries = await Promise.all(
+      visibleMessages.map(message => fetchSnapshotGeometry(Number(message.id)))
+    );
+    const composed = composeGeometries(geometries);
+    if (composed.vertices.length === 0) {
+      viewer.clear();
+      statusEl.textContent = 'Visible messages have no vertices';
+      return;
     }
-    bindMonitorSnapshot(await response.arrayBuffer(), id === null ? 'latest' : `snapshot ${id}`);
+    viewer.bindRenderMesh(composed);
+
+    const counts = composeCounts(geometries);
+    const labels = visibleMessages.map(message => message.name || 'monitor').join(', ');
+    statusEl.textContent =
+      `${visibleMessages.length} visible: ${counts.points} points, ${counts.quads} quads, ${counts.hexas} hexas, ${counts.aabbs} AABBs, ${counts.renderedFaces} rendered faces, ${counts.vectors} vectors (${labels})`;
   } catch (err) {
     console.error(err);
     statusEl.textContent = err.message;
   }
 }
 
+function showOnlySnapshot(id) {
+  selectedLatest = false;
+  selectedMessageId = Number(id);
+  visibleMessageIds = new Set([selectedMessageId]);
+  stopAnimation(false);
+  renderMessageTree(currentMessages);
+  renderVisibleMessages(currentMessages);
+}
+
 async function refreshMonitor() {
   selectedLatest = true;
   selectedMessageId = null;
-  await loadSnapshot();
-  await refreshMessageList();
+  stopAnimation(false);
+  messageListVersion = -1;
+  await refreshMessageList(true);
 }
 
 async function clearMonitor() {
@@ -288,9 +416,13 @@ async function clearMonitor() {
     if (!response.ok) {
       throw new Error(`monitor clear failed with HTTP ${response.status}`);
     }
+    stopAnimation(false);
     selectedLatest = true;
     selectedMessageId = null;
     messageListVersion = -1;
+    currentMessages = [];
+    visibleMessageIds = new Set();
+    snapshotCache.clear();
     viewer.clear();
     renderMessageTree([]);
     statusEl.textContent = 'Monitor messages cleared';
@@ -318,16 +450,90 @@ async function fetchMonitorInfo() {
 function groupMessages(messages) {
   const groups = new Map();
   for (const message of messages) {
+    const animation = (message.animation || '').trim();
     const name = message.name || 'monitor';
-    if (!groups.has(name)) {
-      groups.set(name, []);
+    const key = animation ? `animation:${animation}` : `name:${name}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        title: animation || name,
+        animation: Boolean(animation),
+        snapshots: []
+      });
     }
-    groups.get(name).push(message);
+    groups.get(key).snapshots.push(message);
   }
-  for (const snapshots of groups.values()) {
-    snapshots.sort((a, b) => Number(a.sequence) - Number(b.sequence));
+  for (const group of groups.values()) {
+    group.snapshots.sort((a, b) => Number(a.sequence) - Number(b.sequence));
   }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  return [...groups.values()].sort((a, b) => {
+    if (a.animation !== b.animation) {
+      return a.animation ? -1 : 1;
+    }
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function snapshotText(snapshot) {
+  const quadText = Number(snapshot.quads) > 0 ? `${snapshot.quads} quads` : '';
+  const hexaText = Number(snapshot.hexas) > 0 ? `${snapshot.hexas} hexas` : '';
+  const aabbText = Number(snapshot.aabbs) > 0 ? `${snapshot.aabbs} AABBs` : '';
+  const vectorText = Number(snapshot.vectors) > 0 ? `${snapshot.vectors} vectors` : '';
+  const pieces = [quadText, hexaText, aabbText, vectorText].filter(Boolean);
+  return `t${snapshot.sequence}: ${pieces.length ? pieces.join(', ') : `${snapshot.points} points`}`;
+}
+
+function stopAnimation(render = true) {
+  if (playingAnimation && playingAnimation.timer) {
+    window.clearInterval(playingAnimation.timer);
+  }
+  playingAnimation = null;
+  if (render) {
+    renderMessageTree(currentMessages);
+  }
+}
+
+function startAnimation(group) {
+  const ids = group.snapshots.map(snapshot => Number(snapshot.id));
+  if (ids.length === 0) {
+    return;
+  }
+  stopAnimation(false);
+  selectedLatest = false;
+  playingAnimation = {
+    key: group.key,
+    ids,
+    index: 0,
+    timer: null
+  };
+
+  const advance = () => {
+    if (!playingAnimation || playingAnimation.key !== group.key) {
+      return;
+    }
+    const id = playingAnimation.ids[playingAnimation.index];
+    visibleMessageIds = new Set([id]);
+    selectedMessageId = id;
+    playingAnimation.index = (playingAnimation.index + 1) % playingAnimation.ids.length;
+    renderMessageTree(currentMessages);
+    renderVisibleMessages(currentMessages);
+  };
+  advance();
+  playingAnimation.timer = window.setInterval(advance, ANIMATION_INTERVAL_MS);
+  renderMessageTree(currentMessages);
+}
+
+function toggleSnapshotVisibility(id) {
+  stopAnimation(false);
+  selectedLatest = false;
+  selectedMessageId = Number(id);
+  if (visibleMessageIds.has(selectedMessageId)) {
+    visibleMessageIds.delete(selectedMessageId);
+  } else {
+    visibleMessageIds.add(selectedMessageId);
+  }
+  renderMessageTree(currentMessages);
+  renderVisibleMessages(currentMessages);
 }
 
 function renderMessageTree(messages) {
@@ -340,41 +546,73 @@ function renderMessageTree(messages) {
     return;
   }
 
-  for (const [name, snapshots] of groupMessages(messages)) {
+  for (const group of groupMessages(messages)) {
     const details = document.createElement('details');
     details.open = true;
 
     const summary = document.createElement('summary');
-    summary.textContent = `${name} (${snapshots.length})`;
+    summary.textContent =
+      `${group.animation ? 'Animation ' : ''}${group.title} (${group.snapshots.length})`;
     details.appendChild(summary);
+
+    if (group.animation) {
+      const groupActions = document.createElement('div');
+      groupActions.className = 'group-actions';
+      const playButton = document.createElement('button');
+      playButton.type = 'button';
+      playButton.className = 'secondary';
+      const isPlaying = playingAnimation && playingAnimation.key === group.key;
+      playButton.textContent = isPlaying ? 'Stop Animation' : 'Play Animation';
+      playButton.addEventListener('click', event => {
+        event.stopPropagation();
+        if (isPlaying) {
+          stopAnimation();
+        } else {
+          startAnimation(group);
+        }
+      });
+      groupActions.appendChild(playButton);
+      details.appendChild(groupActions);
+    }
 
     const list = document.createElement('div');
     list.className = 'message-list';
-    for (const snapshot of snapshots) {
+    for (const snapshot of group.snapshots) {
+      const id = Number(snapshot.id);
+      const row = document.createElement('div');
+      row.className = 'message-row';
+
+      const visibility = document.createElement('button');
+      visibility.type = 'button';
+      visibility.className = 'visibility-button';
+      const isVisible = visibleMessageIds.has(id);
+      visibility.textContent = isVisible ? 'Hide' : 'Show';
+      visibility.classList.toggle('visible', isVisible);
+      visibility.addEventListener('click', event => {
+        event.stopPropagation();
+        toggleSnapshotVisibility(id);
+      });
+
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'message-item';
-      if (Number(snapshot.id) === selectedMessageId) {
+      if (id === selectedMessageId) {
         item.classList.add('active');
       }
-      const hexaText = Number(snapshot.hexas) > 0 ? `, ${snapshot.hexas} hexas` : '';
-      const aabbText = Number(snapshot.aabbs) > 0 ? `, ${snapshot.aabbs} AABBs` : '';
-      const vectorText = Number(snapshot.vectors) > 0 ? `, ${snapshot.vectors} vectors` : '';
-      item.textContent = `t${snapshot.sequence}: ${snapshot.quads} quads${hexaText}${aabbText}${vectorText}`;
+      item.textContent = snapshotText(snapshot);
       item.addEventListener('click', () => {
-        selectedLatest = false;
-        selectedMessageId = Number(snapshot.id);
-        renderMessageTree(messages);
-        loadSnapshot(selectedMessageId);
+        showOnlySnapshot(id);
       });
-      list.appendChild(item);
+      row.appendChild(visibility);
+      row.appendChild(item);
+      list.appendChild(row);
     }
     details.appendChild(list);
     messageTreeEl.appendChild(details);
   }
 }
 
-async function refreshMessageList() {
+async function refreshMessageList(forceRender = false) {
   try {
     const response = await fetch('/monitor-list.json?ts=' + Date.now());
     if (!response.ok) {
@@ -382,30 +620,52 @@ async function refreshMessageList() {
     }
     const data = await response.json();
     const messages = Array.isArray(data.messages) ? data.messages : [];
+    currentMessages = messages;
     const latest = messages.length > 0 ? messages[messages.length - 1] : null;
     if (!latest) {
       selectedMessageId = null;
       selectedLatest = true;
+      visibleMessageIds = new Set();
+      stopAnimation(false);
+      viewer.clear();
+      if (data.version !== messageListVersion || forceRender) {
+        messageListVersion = data.version;
+        renderMessageTree(messages);
+      }
       const info = await fetchMonitorInfo();
       statusEl.textContent =
         `No monitor data received. Send snapshots to ${info.ingest_host}:${info.ingest_port}.`;
+      return;
     }
 
+    let visibilityChanged = false;
+    const retainedIds = new Set(messages.map(message => Number(message.id)));
+    for (const id of [...visibleMessageIds]) {
+      if (!retainedIds.has(id)) {
+        visibleMessageIds.delete(id);
+        visibilityChanged = true;
+      }
+    }
     if (selectedMessageId !== null && !messages.some(message => Number(message.id) === selectedMessageId)) {
       selectedMessageId = null;
       selectedLatest = true;
     }
     if (selectedLatest && latest) {
       const latestId = Number(latest.id);
-      if (selectedMessageId !== latestId) {
+      if (selectedMessageId !== latestId || visibleMessageIds.size !== 1 || !visibleMessageIds.has(latestId)) {
         selectedMessageId = latestId;
-        await loadSnapshot(latestId);
+        visibleMessageIds = new Set([latestId]);
+        visibilityChanged = true;
       }
     }
 
-    if (data.version !== messageListVersion) {
+    const listChanged = data.version !== messageListVersion;
+    if (listChanged || forceRender) {
       messageListVersion = data.version;
       renderMessageTree(messages);
+    }
+    if (visibilityChanged || listChanged || forceRender) {
+      await renderVisibleMessages(messages);
     }
   } catch (err) {
     console.error(err);

@@ -33,6 +33,7 @@ struct MonitorSnapshot {
   std::uint64_t sequence{0};
   std::uint64_t binary_bytes{0};
   std::string name;
+  std::string animation;
   std::string header;
   std::vector<char> payload;
 };
@@ -453,6 +454,7 @@ void handle_monitor_ingest(int fd) {
     MonitorSnapshot next;
     next.binary_bytes = payload_bytes;
     next.name = parse_json_string(header, "name", "monitor");
+    next.animation = parse_json_string(header, "animation", "");
     next.header = header;
     next.payload.assign(
         buffer.begin() + static_cast<std::ptrdiff_t>(header_bytes),
@@ -543,6 +545,7 @@ void respond_monitor_list(int fd) {
          << "\"id\":" << snapshot.id << ","
          << "\"sequence\":" << snapshot.sequence << ","
          << "\"name\":\"" << json_escape(snapshot.name) << "\","
+         << "\"animation\":\"" << json_escape(snapshot.animation) << "\","
          << "\"binary_bytes\":" << snapshot.binary_bytes << ","
          << "\"points\":" << parse_section_count(snapshot.header, "points")
          << ",";

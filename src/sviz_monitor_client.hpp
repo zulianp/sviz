@@ -274,6 +274,8 @@ public:
   Message(const Message &other) {
     std::lock_guard<std::recursive_mutex> lock(other.mutex_);
     name_ = other.name_;
+    animation_ = other.animation_;
+    has_animation_ = other.has_animation_;
     vector_scale_ = other.vector_scale_;
     points_payload_ = other.points_payload_;
     quads_payload_ = other.quads_payload_;
@@ -295,6 +297,8 @@ public:
     }
     std::scoped_lock lock(mutex_, other.mutex_);
     name_ = other.name_;
+    animation_ = other.animation_;
+    has_animation_ = other.has_animation_;
     vector_scale_ = other.vector_scale_;
     points_payload_ = other.points_payload_;
     quads_payload_ = other.quads_payload_;
@@ -314,6 +318,8 @@ public:
   Message(Message &&other) {
     std::lock_guard<std::recursive_mutex> lock(other.mutex_);
     name_ = std::move(other.name_);
+    animation_ = std::move(other.animation_);
+    has_animation_ = other.has_animation_;
     vector_scale_ = other.vector_scale_;
     points_payload_ = std::move(other.points_payload_);
     quads_payload_ = std::move(other.quads_payload_);
@@ -335,6 +341,8 @@ public:
     }
     std::scoped_lock lock(mutex_, other.mutex_);
     name_ = std::move(other.name_);
+    animation_ = std::move(other.animation_);
+    has_animation_ = other.has_animation_;
     vector_scale_ = other.vector_scale_;
     points_payload_ = std::move(other.points_payload_);
     quads_payload_ = std::move(other.quads_payload_);
@@ -354,6 +362,24 @@ public:
   Message &set_vector_scale(double scale) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     vector_scale_ = scale;
+    return *this;
+  }
+
+  Message &animation(std::string name) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    animation_ = std::move(name);
+    has_animation_ = !animation_.empty();
+    return *this;
+  }
+
+  Message &animation_node(std::string name) {
+    return animation(std::move(name));
+  }
+
+  Message &clear_animation() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    animation_.clear();
+    has_animation_ = false;
     return *this;
   }
 
@@ -651,8 +677,11 @@ public:
     out << "{\"sviz_protocol\":1"
         << ",\"kind\":\"monitor\""
         << ",\"name\":\"" << detail::json_escape(name_) << "\""
-        << ",\"endianness\":\"little\""
-        << ",\"binary_bytes\":" << binary_payload_size()
+        << ",\"endianness\":\"little\"";
+    if (has_animation_) {
+      out << ",\"animation\":\"" << detail::json_escape(animation_) << "\"";
+    }
+    out << ",\"binary_bytes\":" << binary_payload_size()
         << ",\"vector_scale\":" << vector_scale_;
     if (points.present) {
       append_section_json(out, points);
@@ -795,6 +824,8 @@ private:
   }
 
   std::string name_;
+  std::string animation_;
+  bool has_animation_{false};
   double vector_scale_{1.0};
   std::vector<char> points_payload_;
   std::vector<char> quads_payload_;

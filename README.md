@@ -41,6 +41,10 @@ External tools can send monitor meshes to the server through the monitor ingest
 TCP socket. The browser Monitor view retains received messages and exposes them
 through a left-side tree grouped by message name, with each retained snapshot
 available as a temporal child entry.
+Messages can also opt into an animation node; snapshots with the same animation
+name are grouped in the browser and can be played in send order. Each retained
+message has a visibility control, so multiple snapshots can be displayed at the
+same time.
 
 Each socket message is:
 
@@ -56,7 +60,7 @@ after the newline. Numeric payloads are little-endian.
 Current monitor fields:
 
 ```json
-{"sviz_protocol":1,"kind":"monitor","name":"quad-vector-example","endianness":"little","binary_bytes":1400,"vector_scale":0.35,"points":{"dtype":"float32","components":3,"count":30,"offset":0},"quads":{"dtype":"uint32","components":4,"count":20,"offset":360},"vectors":{"dtype":"float32","components":6,"count":30,"offset":680}}
+{"sviz_protocol":1,"kind":"monitor","name":"quad-vector-example","endianness":"little","animation":"solver-steps","binary_bytes":1400,"vector_scale":0.35,"points":{"dtype":"float32","components":3,"count":30,"offset":0},"quads":{"dtype":"uint32","components":4,"count":20,"offset":360},"vectors":{"dtype":"float32","components":6,"count":30,"offset":680}}
 ```
 
 To clear all retained monitor messages, send a clear header with no payload:
@@ -154,6 +158,25 @@ msg.set_vector_scale(0.1)
        sviz::view(vz, n));
 
 sviz::Client().send(msg);
+```
+
+Send animation frames:
+
+```cpp
+sviz::Client client("127.0.0.1", 8081);
+for (int frame = 0; frame < num_frames; ++frame) {
+    sviz::Message msg("deformed-frame");
+    msg.animation_node("deformation")
+       .quad_mesh_soa(
+           sviz::view(x[frame], num_points),
+           sviz::view(y[frame], num_points),
+           sviz::view(z[frame], num_points),
+           sviz::view(a, num_quads),
+           sviz::view(b, num_quads),
+           sviz::view(c, num_quads),
+           sviz::view(d, num_quads));
+    client.send(msg);
+}
 ```
 
 Clear the retained monitor messages:

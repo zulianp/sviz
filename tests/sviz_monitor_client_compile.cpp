@@ -54,6 +54,19 @@ int main(int argc, char **argv) {
   single.single_quad(quad);
   (void)single.header_json();
 
+  sviz::Message animation0("compile-animation-frame-0");
+  animation0.animation_node("compile-animation").single_quad(quad);
+  (void)animation0.wire_bytes();
+
+  std::array<std::array<float, 3>, 4> shifted_quad = {
+      {{{0.25f, 0.0f, 0.0f}},
+       {{1.25f, 0.0f, 0.0f}},
+       {{1.25f, 1.0f, 0.0f}},
+       {{0.25f, 1.0f, 0.0f}}}};
+  sviz::Message animation1("compile-animation-frame-1");
+  animation1.animation("compile-animation").single_quad(shifted_quad);
+  (void)animation1.wire_bytes();
+
   float vx[4] = {1.0f, 0.0f, -1.0f, 0.0f};
   float vy[4] = {0.0f, 1.0f, 0.0f, -1.0f};
   float vz[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -88,6 +101,8 @@ int main(int argc, char **argv) {
     client.send(mesh);
     client.send(hex);
     client.send(aabbs);
+    client.send(animation0);
+    client.send(animation1);
     client.send(single);
     client.send(quivers);
   }
