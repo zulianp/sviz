@@ -37,9 +37,10 @@ second port is omitted, the server uses `http_port + 1`.
 
 ## Monitor Protocol
 
-External tools can send the latest monitor mesh to the server through the
-monitor ingest TCP socket. The browser Monitor view polls the server and renders
-the latest accepted snapshot.
+External tools can send monitor meshes to the server through the monitor ingest
+TCP socket. The browser Monitor view retains received messages and exposes them
+through a left-side tree grouped by message name, with each retained snapshot
+available as a temporal child entry.
 
 Each socket message is:
 
@@ -56,6 +57,12 @@ Current monitor fields:
 
 ```json
 {"sviz_protocol":1,"kind":"monitor","name":"quad-vector-example","endianness":"little","binary_bytes":1400,"vector_scale":0.35,"points":{"dtype":"float32","components":3,"count":30,"offset":0},"quads":{"dtype":"uint32","components":4,"count":20,"offset":360},"vectors":{"dtype":"float32","components":6,"count":30,"offset":680}}
+```
+
+To clear all retained monitor messages, send a clear header with no payload:
+
+```json
+{"sviz_protocol":1,"kind":"clear","binary_bytes":0}
 ```
 
 Payload sections:
@@ -109,6 +116,14 @@ msg.set_vector_scale(0.1)
 sviz::Client().send(msg);
 ```
 
+Clear the retained monitor messages:
+
+```cpp
+sviz::Client("127.0.0.1", 8081).clear();
+// or
+sviz::send_clear("127.0.0.1", 8081);
+```
+
 `view(data, count, stride)` also supports strided SoA fields. Interleaved
 helpers are available as `points_interleaved`, `quads_interleaved`,
 `quad_mesh_interleaved`, and `quivers_interleaved`.
@@ -150,4 +165,5 @@ With the default server ports, the same command can be shortened to:
 ```
 
 Then open `http://127.0.0.1:8080/monitor` in the browser. The server exposes the
-latest snapshot to the web client at `/monitor.bin`.
+latest snapshot at `/monitor.bin`, retained snapshots at `/monitor.bin?id=N`,
+and the retained message list at `/monitor-list.json`.

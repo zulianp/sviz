@@ -632,6 +632,19 @@ public:
     }
   }
 
+  void clear() const {
+    const std::string bytes =
+        "{\"sviz_protocol\":1,\"kind\":\"clear\",\"binary_bytes\":0}\n";
+    detail::socket_type fd = detail::connect_tcp(host_, port_);
+    try {
+      detail::send_all(fd, bytes.data(), bytes.size());
+      detail::close_socket(fd);
+    } catch (...) {
+      detail::close_socket(fd);
+      throw;
+    }
+  }
+
 private:
   std::string host_;
   int port_;
@@ -665,6 +678,11 @@ inline void send_quivers_soa(const std::string &host, int port,
   Message message(name);
   message.set_vector_scale(vector_scale).quivers_soa(x, y, z, vx, vy, vz);
   Client(host, port).send(message);
+}
+
+inline void send_clear(const std::string &host = "127.0.0.1",
+                       int port = 8081) {
+  Client(host, port).clear();
 }
 
 } // namespace sviz

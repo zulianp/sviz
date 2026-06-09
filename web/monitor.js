@@ -2,6 +2,7 @@ import { MeshViewer } from './viewer.js';
 
 const canvas = document.getElementById('view');
 const statusEl = document.getElementById('status');
+const messageTreeEl = document.getElementById('messageTree');
 const refreshMonitorButton = document.getElementById('refreshMonitor');
 const rotateModeButton = document.getElementById('rotateMode');
 const panModeButton = document.getElementById('panMode');
@@ -9,6 +10,9 @@ const resetViewButton = document.getElementById('resetView');
 
 const viewer = new MeshViewer(canvas);
 let monitorInfo = null;
+let selectedMessageId = null;
+let selectedLatest = true;
+let messageListVersion = -1;
 
 function findJsonHeaderEnd(bytes) {
   const newline = bytes.indexOf(10);
@@ -99,7 +103,7 @@ function vectorSegments(vectors, scale) {
   return segments;
 }
 
-function bindMonitorSnapshot(buffer) {
+function bindMonitorSnapshot(buffer, label = 'monitor socket') {
   const bytes = new Uint8Array(buffer);
   const jsonEnd = findJsonHeaderEnd(bytes);
   const headerText = new TextDecoder().decode(bytes.subarray(0, jsonEnd.textEnd));
@@ -126,12 +130,16 @@ function bindMonitorSnapshot(buffer) {
 
   const quadCount = Math.floor(quads.length / 4);
   const vectorCount = vectors ? Math.floor(vectors.length / 6) : 0;
-  statusEl.textContent = `${points.length / 3} points, ${quadCount} quads, ${vectorCount} vectors from monitor socket`;
+  statusEl.textContent = `${points.length / 3} points, ${quadCount} quads, ${vectorCount} vectors from ${label}`;
 }
 
-async function refreshMonitor() {
+async function loadSnapshot(id = null) {
   try {
-    const response = await fetch('/monitor.bin?ts=' + Date.now());
+    const params = new URLSearchParams({ ts: String(Date.now()) });
+    if (id !== null) {
+      params.set('id', String(id));
+    }
+    const response = await fetch('/monitor.bin?' + params.toString());
     if (response.status === 204) {
       const info = await fetchMonitorInfo();
       statusEl.textContent =
@@ -141,11 +149,18 @@ async function refreshMonitor() {
     if (!response.ok) {
       throw new Error(`monitor fetch failed with HTTP ${response.status}`);
     }
-    bindMonitorSnapshot(await response.arrayBuffer());
+    bindMonitorSnapshot(await response.arrayBuffer(), id === null ? 'latest' : `snapshot ${id}`);
   } catch (err) {
     console.error(err);
     statusEl.textContent = err.message;
   }
+}
+
+async function refreshMonitor() {
+  selectedLatest = true;
+  selectedMessageId = null;
+  await loadSnapshot();
+  await refreshMessageList();
 }
 
 async function fetchMonitorInfo() {
@@ -160,6 +175,102 @@ async function fetchMonitorInfo() {
   return monitorInfo;
 }
 
+function groupMessages(messages) {
+  const groups = new Map();
+  for (const message of messages) {
+    const name = message.name || 'monitor';
+    if (!groups.has(name)) {
+      groups.set(name, []);
+    }
+    groups.get(name).push(message);
+  }
+  for (const snapshots of groups.values()) {
+    snapshots.sort((a, b) => Number(a.sequence) - Number(b.sequence));
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
+function renderMessageTree(messages) {
+  messageTreeEl.textContent = '';
+  if (messages.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No retained messages';
+    messageTreeEl.appendChild(empty);
+    return;
+  }
+
+  for (const [name, snapshots] of groupMessages(messages)) {
+    const details = document.createElement('details');
+    details.open = true;
+
+    const summary = document.createElement('summary');
+    summary.textContent = `${name} (${snapshots.length})`;
+    details.appendChild(summary);
+
+    const list = document.createElement('div');
+    list.className = 'message-list';
+    for (const snapshot of snapshots) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'message-item';
+      if (Number(snapshot.id) === selectedMessageId) {
+        item.classList.add('active');
+      }
+      const vectorText = Number(snapshot.vectors) > 0 ? `, ${snapshot.vectors} vectors` : '';
+      item.textContent = `t${snapshot.sequence}: ${snapshot.quads} quads${vectorText}`;
+      item.addEventListener('click', () => {
+        selectedLatest = false;
+        selectedMessageId = Number(snapshot.id);
+        renderMessageTree(messages);
+        loadSnapshot(selectedMessageId);
+      });
+      list.appendChild(item);
+    }
+    details.appendChild(list);
+    messageTreeEl.appendChild(details);
+  }
+}
+
+async function refreshMessageList() {
+  try {
+    const response = await fetch('/monitor-list.json?ts=' + Date.now());
+    if (!response.ok) {
+      throw new Error(`monitor list fetch failed with HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const messages = Array.isArray(data.messages) ? data.messages : [];
+    const latest = messages.length > 0 ? messages[messages.length - 1] : null;
+    if (!latest) {
+      selectedMessageId = null;
+      selectedLatest = true;
+      const info = await fetchMonitorInfo();
+      statusEl.textContent =
+        `No monitor data received. Send snapshots to ${info.ingest_host}:${info.ingest_port}.`;
+    }
+
+    if (selectedMessageId !== null && !messages.some(message => Number(message.id) === selectedMessageId)) {
+      selectedMessageId = null;
+      selectedLatest = true;
+    }
+    if (selectedLatest && latest) {
+      const latestId = Number(latest.id);
+      if (selectedMessageId !== latestId) {
+        selectedMessageId = latestId;
+        await loadSnapshot(latestId);
+      }
+    }
+
+    if (data.version !== messageListVersion) {
+      messageListVersion = data.version;
+      renderMessageTree(messages);
+    }
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = err.message;
+  }
+}
+
 function setTool(tool) {
   viewer.setTool(tool);
   rotateModeButton.classList.toggle('active', tool === 'rotate');
@@ -171,5 +282,5 @@ rotateModeButton.addEventListener('click', () => setTool('rotate'));
 panModeButton.addEventListener('click', () => setTool('pan'));
 resetViewButton.addEventListener('click', () => viewer.resetView());
 
-refreshMonitor();
-setInterval(refreshMonitor, 1000);
+refreshMessageList();
+setInterval(refreshMessageList, 1000);

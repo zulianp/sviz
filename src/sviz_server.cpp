@@ -25,17 +25,23 @@ namespace {
 struct Request {
   std::string method;
   std::string path;
+  std::string query;
 };
 
 struct MonitorSnapshot {
-  std::uint64_t version{0};
+  std::uint64_t id{0};
+  std::uint64_t sequence{0};
+  std::uint64_t binary_bytes{0};
+  std::string name;
   std::string header;
   std::vector<char> payload;
 };
 
 std::vector<std::filesystem::path> g_asset_roots;
 std::mutex g_monitor_mutex;
-MonitorSnapshot g_monitor;
+std::vector<MonitorSnapshot> g_monitor_snapshots;
+std::uint64_t g_monitor_version = 0;
+std::uint64_t g_monitor_next_id = 1;
 int g_monitor_port = 0;
 
 std::string read_file(const std::filesystem::path &path) {
@@ -138,6 +144,7 @@ Request read_request(int fd) {
   line >> req.method >> req.path;
   const auto query = req.path.find('?');
   if (query != std::string::npos) {
+    req.query = req.path.substr(query + 1);
     req.path.resize(query);
   }
   return req;
@@ -221,6 +228,163 @@ std::uint64_t parse_binary_bytes(const std::string &header) {
   return std::stoull(header.substr(first_digit, end - first_digit));
 }
 
+std::uint64_t parse_json_u64(const std::string &header,
+                             const std::string &field,
+                             const std::uint64_t fallback = 0) {
+  const std::string key = "\"" + field + "\"";
+  const auto key_pos = header.find(key);
+  if (key_pos == std::string::npos) {
+    return fallback;
+  }
+  const auto colon = header.find(':', key_pos);
+  if (colon == std::string::npos) {
+    return fallback;
+  }
+  std::size_t first_digit = colon + 1;
+  while (first_digit < header.size() &&
+         std::isspace(static_cast<unsigned char>(header[first_digit]))) {
+    ++first_digit;
+  }
+  if (first_digit == header.size() ||
+      !std::isdigit(static_cast<unsigned char>(header[first_digit]))) {
+    return fallback;
+  }
+  std::size_t end = first_digit;
+  while (end < header.size() &&
+         std::isdigit(static_cast<unsigned char>(header[end]))) {
+    ++end;
+  }
+  return std::stoull(header.substr(first_digit, end - first_digit));
+}
+
+std::string parse_json_string(const std::string &header,
+                              const std::string &field,
+                              const std::string &fallback = "") {
+  const std::string key = "\"" + field + "\"";
+  const auto key_pos = header.find(key);
+  if (key_pos == std::string::npos) {
+    return fallback;
+  }
+  const auto colon = header.find(':', key_pos);
+  if (colon == std::string::npos) {
+    return fallback;
+  }
+  std::size_t quote = colon + 1;
+  while (quote < header.size() &&
+         std::isspace(static_cast<unsigned char>(header[quote]))) {
+    ++quote;
+  }
+  if (quote == header.size() || header[quote] != '"') {
+    return fallback;
+  }
+
+  std::string out;
+  for (std::size_t i = quote + 1; i < header.size(); ++i) {
+    const char c = header[i];
+    if (c == '"') {
+      return out;
+    }
+    if (c == '\\' && i + 1 < header.size()) {
+      const char escaped = header[++i];
+      switch (escaped) {
+      case '"':
+      case '\\':
+      case '/':
+        out.push_back(escaped);
+        break;
+      case 'b':
+        out.push_back('\b');
+        break;
+      case 'f':
+        out.push_back('\f');
+        break;
+      case 'n':
+        out.push_back('\n');
+        break;
+      case 'r':
+        out.push_back('\r');
+        break;
+      case 't':
+        out.push_back('\t');
+        break;
+      default:
+        break;
+      }
+    } else {
+      out.push_back(c);
+    }
+  }
+
+  return fallback;
+}
+
+std::string json_escape(const std::string &value) {
+  std::string out;
+  out.reserve(value.size() + 8);
+  for (const char c : value) {
+    switch (c) {
+    case '"':
+      out += "\\\"";
+      break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '\b':
+      out += "\\b";
+      break;
+    case '\f':
+      out += "\\f";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    default:
+      if (static_cast<unsigned char>(c) < 0x20) {
+        const char *digits = "0123456789abcdef";
+        out += "\\u00";
+        out.push_back(digits[(static_cast<unsigned char>(c) >> 4) & 0xf]);
+        out.push_back(digits[static_cast<unsigned char>(c) & 0xf]);
+      } else {
+        out.push_back(c);
+      }
+    }
+  }
+  return out;
+}
+
+std::uint64_t parse_query_u64(const std::string &query,
+                              const std::string &key,
+                              const std::uint64_t fallback = 0) {
+  std::size_t pos = 0;
+  while (pos <= query.size()) {
+    const auto amp = query.find('&', pos);
+    const auto end = amp == std::string::npos ? query.size() : amp;
+    const auto eq = query.find('=', pos);
+    if (eq != std::string::npos && eq < end &&
+        query.substr(pos, eq - pos) == key) {
+      const std::string value = query.substr(eq + 1, end - eq - 1);
+      if (!value.empty() &&
+          std::all_of(value.begin(), value.end(), [](unsigned char c) {
+            return std::isdigit(c);
+          })) {
+        return std::stoull(value);
+      }
+      return fallback;
+    }
+    if (amp == std::string::npos) {
+      break;
+    }
+    pos = amp + 1;
+  }
+  return fallback;
+}
+
 bool recv_more(int fd, std::vector<char> &buffer) {
   char chunk[8192];
   const ssize_t n = ::recv(fd, chunk, sizeof(chunk), 0);
@@ -248,6 +412,7 @@ void handle_monitor_ingest(int fd) {
 
     const std::string header(buffer.data(), buffer.data() + header_bytes);
     const std::uint64_t payload_bytes = parse_binary_bytes(header);
+    const std::string kind = parse_json_string(header, "kind", "monitor");
     if (payload_bytes > 1024ull * 1024ull * 1024ull) {
       throw std::runtime_error("monitor payload exceeds 1 GiB");
     }
@@ -259,7 +424,22 @@ void handle_monitor_ingest(int fd) {
       }
     }
 
+    if (kind == "clear") {
+      std::lock_guard<std::mutex> lock(g_monitor_mutex);
+      g_monitor_snapshots.clear();
+      ++g_monitor_version;
+      std::cout << "Monitor snapshots cleared\n";
+      ::close(fd);
+      return;
+    }
+
+    if (kind != "monitor") {
+      throw std::runtime_error("unsupported monitor message kind: " + kind);
+    }
+
     MonitorSnapshot next;
+    next.binary_bytes = payload_bytes;
+    next.name = parse_json_string(header, "name", "monitor");
     next.header = header;
     next.payload.assign(
         buffer.begin() + static_cast<std::ptrdiff_t>(header_bytes),
@@ -267,8 +447,10 @@ void handle_monitor_ingest(int fd) {
             static_cast<std::ptrdiff_t>(header_bytes + payload_bytes));
     {
       std::lock_guard<std::mutex> lock(g_monitor_mutex);
-      next.version = g_monitor.version + 1;
-      g_monitor = std::move(next);
+      next.id = g_monitor_next_id++;
+      next.sequence = next.id;
+      g_monitor_snapshots.push_back(std::move(next));
+      ++g_monitor_version;
     }
     std::cout << "Monitor snapshot received: " << payload_bytes << " bytes\n";
   } catch (const std::exception &e) {
@@ -277,16 +459,30 @@ void handle_monitor_ingest(int fd) {
   ::close(fd);
 }
 
-void respond_monitor_snapshot(int fd) {
+void respond_monitor_snapshot(int fd, const Request &req) {
   MonitorSnapshot snapshot;
   {
     std::lock_guard<std::mutex> lock(g_monitor_mutex);
-    snapshot = g_monitor;
-  }
+    if (g_monitor_snapshots.empty()) {
+      respond_empty(fd, 204, "No Content");
+      return;
+    }
 
-  if (snapshot.version == 0) {
-    respond_empty(fd, 204, "No Content");
-    return;
+    const std::uint64_t requested_id = parse_query_u64(req.query, "id");
+    if (requested_id == 0) {
+      snapshot = g_monitor_snapshots.back();
+    } else {
+      const auto it = std::find_if(
+          g_monitor_snapshots.begin(), g_monitor_snapshots.end(),
+          [requested_id](const MonitorSnapshot &candidate) {
+            return candidate.id == requested_id;
+          });
+      if (it == g_monitor_snapshots.end()) {
+        respond_empty(fd, 404, "Not Found");
+        return;
+      }
+      snapshot = *it;
+    }
   }
 
   std::string body;
@@ -298,16 +494,61 @@ void respond_monitor_snapshot(int fd) {
 
 void respond_monitor_info(int fd) {
   std::uint64_t version = 0;
+  std::size_t count = 0;
   {
     std::lock_guard<std::mutex> lock(g_monitor_mutex);
-    version = g_monitor.version;
+    version = g_monitor_version;
+    count = g_monitor_snapshots.size();
   }
 
   std::ostringstream body;
   body << "{"
        << "\"version\":" << version << ","
+       << "\"count\":" << count << ","
        << "\"ingest_host\":\"127.0.0.1\","
        << "\"ingest_port\":" << g_monitor_port << "}\n";
+  respond(fd, 200, "OK", "application/json; charset=utf-8", body.str());
+}
+
+void respond_monitor_list(int fd) {
+  std::vector<MonitorSnapshot> snapshots;
+  std::uint64_t version = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_monitor_mutex);
+    snapshots = g_monitor_snapshots;
+    version = g_monitor_version;
+  }
+
+  std::ostringstream body;
+  body << "{\"version\":" << version << ",\"messages\":[";
+  for (std::size_t i = 0; i < snapshots.size(); ++i) {
+    const auto &snapshot = snapshots[i];
+    if (i > 0) {
+      body << ",";
+    }
+    body << "{"
+         << "\"id\":" << snapshot.id << ","
+         << "\"sequence\":" << snapshot.sequence << ","
+         << "\"name\":\"" << json_escape(snapshot.name) << "\","
+         << "\"binary_bytes\":" << snapshot.binary_bytes << ","
+         << "\"points\":" << parse_json_u64(snapshot.header, "count", 0)
+         << ",";
+
+    const std::uint64_t quad_count =
+        parse_json_u64(snapshot.header.substr(
+                           snapshot.header.find("\"quads\"") == std::string::npos
+                               ? snapshot.header.size()
+                               : snapshot.header.find("\"quads\"")),
+                       "count", 0);
+    const auto vectors_pos = snapshot.header.find("\"vectors\"");
+    const std::uint64_t vector_count =
+        vectors_pos == std::string::npos
+            ? 0
+            : parse_json_u64(snapshot.header.substr(vectors_pos), "count", 0);
+    body << "\"quads\":" << quad_count << ","
+         << "\"vectors\":" << vector_count << "}";
+  }
+  body << "]}\n";
   respond(fd, 200, "OK", "application/json; charset=utf-8", body.str());
 }
 
@@ -319,11 +560,15 @@ void handle_request(int fd, const Request &req) {
   }
 
   if (req.path == "/monitor.bin") {
-    respond_monitor_snapshot(fd);
+    respond_monitor_snapshot(fd, req);
     return;
   }
   if (req.path == "/monitor-info.json") {
     respond_monitor_info(fd);
+    return;
+  }
+  if (req.path == "/monitor-list.json") {
+    respond_monitor_list(fd);
     return;
   }
 
