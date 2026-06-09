@@ -278,12 +278,14 @@ public:
     points_payload_ = other.points_payload_;
     quads_payload_ = other.quads_payload_;
     hexas_payload_ = other.hexas_payload_;
+    aabbs_payload_ = other.aabbs_payload_;
     vectors_payload_ = other.vectors_payload_;
     payload_cache_ = other.payload_cache_;
     payload_cache_dirty_ = other.payload_cache_dirty_;
     points_ = other.points_;
     quads_ = other.quads_;
     hexas_ = other.hexas_;
+    aabbs_ = other.aabbs_;
     vectors_ = other.vectors_;
   }
 
@@ -297,12 +299,14 @@ public:
     points_payload_ = other.points_payload_;
     quads_payload_ = other.quads_payload_;
     hexas_payload_ = other.hexas_payload_;
+    aabbs_payload_ = other.aabbs_payload_;
     vectors_payload_ = other.vectors_payload_;
     payload_cache_ = other.payload_cache_;
     payload_cache_dirty_ = other.payload_cache_dirty_;
     points_ = other.points_;
     quads_ = other.quads_;
     hexas_ = other.hexas_;
+    aabbs_ = other.aabbs_;
     vectors_ = other.vectors_;
     return *this;
   }
@@ -314,12 +318,14 @@ public:
     points_payload_ = std::move(other.points_payload_);
     quads_payload_ = std::move(other.quads_payload_);
     hexas_payload_ = std::move(other.hexas_payload_);
+    aabbs_payload_ = std::move(other.aabbs_payload_);
     vectors_payload_ = std::move(other.vectors_payload_);
     payload_cache_ = std::move(other.payload_cache_);
     payload_cache_dirty_ = other.payload_cache_dirty_;
     points_ = other.points_;
     quads_ = other.quads_;
     hexas_ = other.hexas_;
+    aabbs_ = other.aabbs_;
     vectors_ = other.vectors_;
   }
 
@@ -333,12 +339,14 @@ public:
     points_payload_ = std::move(other.points_payload_);
     quads_payload_ = std::move(other.quads_payload_);
     hexas_payload_ = std::move(other.hexas_payload_);
+    aabbs_payload_ = std::move(other.aabbs_payload_);
     vectors_payload_ = std::move(other.vectors_payload_);
     payload_cache_ = std::move(other.payload_cache_);
     payload_cache_dirty_ = other.payload_cache_dirty_;
     points_ = other.points_;
     quads_ = other.quads_;
     hexas_ = other.hexas_;
+    aabbs_ = other.aabbs_;
     vectors_ = other.vectors_;
     return *this;
   }
@@ -448,6 +456,54 @@ public:
                      view(abcdefgh + 7, hexa_count, stride_components));
   }
 
+  template <class XMin, class YMin, class ZMin, class XMax, class YMax,
+            class ZMax>
+  Message &aabb_soa(ArrayView<XMin> xmin, ArrayView<YMin> ymin,
+                    ArrayView<ZMin> zmin, ArrayView<XMax> xmax,
+                    ArrayView<YMax> ymax, ArrayView<ZMax> zmax) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    detail::check_view("aabb xmin", xmin.count, xmin.count, xmin.data,
+                       xmin.stride);
+    detail::check_view("aabb ymin", xmin.count, ymin.count, ymin.data,
+                       ymin.stride);
+    detail::check_view("aabb zmin", xmin.count, zmin.count, zmin.data,
+                       zmin.stride);
+    detail::check_view("aabb xmax", xmin.count, xmax.count, xmax.data,
+                       xmax.stride);
+    detail::check_view("aabb ymax", xmin.count, ymax.count, ymax.data,
+                       ymax.stride);
+    detail::check_view("aabb zmax", xmin.count, zmax.count, zmax.data,
+                       zmax.stride);
+    append_aabbs_soa(xmin, ymin, zmin, xmax, ymax, zmax);
+    return *this;
+  }
+
+  template <class XMin, class YMin, class ZMin, class XMax, class YMax,
+            class ZMax>
+  Message &aabbs_soa(ArrayView<XMin> xmin, ArrayView<YMin> ymin,
+                     ArrayView<ZMin> zmin, ArrayView<XMax> xmax,
+                     ArrayView<YMax> ymax, ArrayView<ZMax> zmax) {
+    return aabb_soa(xmin, ymin, zmin, xmax, ymax, zmax);
+  }
+
+  template <class T>
+  Message &aabb_interleaved(const T *bounds, std::size_t aabb_count,
+                            std::size_t stride_components = 6) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (aabb_count > 0 && bounds == nullptr) {
+      throw Error("interleaved aabb stream has null data");
+    }
+    if (stride_components < 6) {
+      throw Error("interleaved aabb stride must be at least 6 components");
+    }
+    return aabb_soa(view(bounds, aabb_count, stride_components),
+                    view(bounds + 1, aabb_count, stride_components),
+                    view(bounds + 2, aabb_count, stride_components),
+                    view(bounds + 3, aabb_count, stride_components),
+                    view(bounds + 4, aabb_count, stride_components),
+                    view(bounds + 5, aabb_count, stride_components));
+  }
+
   template <class X, class Y, class Z, class A, class B, class C, class D>
   Message &quad_mesh_soa(ArrayView<X> x, ArrayView<Y> y, ArrayView<Z> z,
                          ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
@@ -533,7 +589,7 @@ public:
     detail::check_view("quiver vz", x.count, vz.count, vz.data, vz.stride);
 
     points_soa(x, y, z);
-    if (!quads_.present && !hexas_.present) {
+    if (!quads_.present && !hexas_.present && !aabbs_.present) {
       ensure_section(quads_, "quads", "uint32", 4);
     }
     ensure_section(vectors_, "vectors", "float32", 6);
@@ -571,23 +627,26 @@ public:
 
   std::string header_json() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (!points_.present) {
-      throw Error("monitor message is missing points");
+    if (!points_.present && !aabbs_.present) {
+      throw Error("monitor message is missing points or aabbs");
     }
-    if (!quads_.present && !hexas_.present) {
-      throw Error("monitor message is missing quads or hexas");
+    if (!quads_.present && !hexas_.present && !aabbs_.present) {
+      throw Error("monitor message is missing quads, hexas, or aabbs");
     }
 
     std::ostringstream out;
     detail::Section points = points_;
     detail::Section quads = quads_;
     detail::Section hexas = hexas_;
+    detail::Section aabbs = aabbs_;
     detail::Section vectors = vectors_;
     points.offset = 0;
     quads.offset = points_payload_.size();
     hexas.offset = points_payload_.size() + quads_payload_.size();
-    vectors.offset =
+    aabbs.offset =
         points_payload_.size() + quads_payload_.size() + hexas_payload_.size();
+    vectors.offset = points_payload_.size() + quads_payload_.size() +
+                     hexas_payload_.size() + aabbs_payload_.size();
 
     out << "{\"sviz_protocol\":1"
         << ",\"kind\":\"monitor\""
@@ -595,12 +654,17 @@ public:
         << ",\"endianness\":\"little\""
         << ",\"binary_bytes\":" << binary_payload_size()
         << ",\"vector_scale\":" << vector_scale_;
-    append_section_json(out, points);
+    if (points.present) {
+      append_section_json(out, points);
+    }
     if (quads.present) {
       append_section_json(out, quads);
     }
     if (hexas.present) {
       append_section_json(out, hexas);
+    }
+    if (aabbs.present) {
+      append_section_json(out, aabbs);
     }
     if (vectors.present) {
       append_section_json(out, vectors);
@@ -687,9 +751,27 @@ private:
     mark_payload_dirty();
   }
 
+  template <class XMin, class YMin, class ZMin, class XMax, class YMax,
+            class ZMax>
+  void append_aabbs_soa(ArrayView<XMin> xmin, ArrayView<YMin> ymin,
+                        ArrayView<ZMin> zmin, ArrayView<XMax> xmax,
+                        ArrayView<YMax> ymax, ArrayView<ZMax> zmax) {
+    ensure_section(aabbs_, "aabbs", "float32", 6);
+    for (std::size_t i = 0; i < xmin.count; ++i) {
+      detail::append_scalar_as_f32(aabbs_payload_, xmin[i]);
+      detail::append_scalar_as_f32(aabbs_payload_, ymin[i]);
+      detail::append_scalar_as_f32(aabbs_payload_, zmin[i]);
+      detail::append_scalar_as_f32(aabbs_payload_, xmax[i]);
+      detail::append_scalar_as_f32(aabbs_payload_, ymax[i]);
+      detail::append_scalar_as_f32(aabbs_payload_, zmax[i]);
+    }
+    aabbs_.count += xmin.count;
+    mark_payload_dirty();
+  }
+
   std::size_t binary_payload_size() const {
     return points_payload_.size() + quads_payload_.size() +
-           hexas_payload_.size() +
+           hexas_payload_.size() + aabbs_payload_.size() +
            vectors_payload_.size();
   }
 
@@ -697,6 +779,7 @@ private:
     out.insert(out.end(), points_payload_.begin(), points_payload_.end());
     out.insert(out.end(), quads_payload_.begin(), quads_payload_.end());
     out.insert(out.end(), hexas_payload_.begin(), hexas_payload_.end());
+    out.insert(out.end(), aabbs_payload_.begin(), aabbs_payload_.end());
     out.insert(out.end(), vectors_payload_.begin(), vectors_payload_.end());
   }
 
@@ -716,12 +799,14 @@ private:
   std::vector<char> points_payload_;
   std::vector<char> quads_payload_;
   std::vector<char> hexas_payload_;
+  std::vector<char> aabbs_payload_;
   std::vector<char> vectors_payload_;
   mutable std::vector<char> payload_cache_;
   mutable bool payload_cache_dirty_{true};
   detail::Section points_;
   detail::Section quads_;
   detail::Section hexas_;
+  detail::Section aabbs_;
   detail::Section vectors_;
   mutable std::recursive_mutex mutex_;
 };
@@ -781,6 +866,18 @@ inline void send_hexa_mesh_soa(const std::string &host, int port,
                                ArrayView<H> h) {
   Message message(name);
   message.hexa_mesh_soa(x, y, z, a, b, c, d, e, f, g, h);
+  Client(host, port).send(message);
+}
+
+template <class XMin, class YMin, class ZMin, class XMax, class YMax,
+          class ZMax>
+inline void send_aabb_soa(const std::string &host, int port,
+                          const std::string &name, ArrayView<XMin> xmin,
+                          ArrayView<YMin> ymin, ArrayView<ZMin> zmin,
+                          ArrayView<XMax> xmax, ArrayView<YMax> ymax,
+                          ArrayView<ZMax> zmax) {
+  Message message(name);
+  message.aabb_soa(xmin, ymin, zmin, xmax, ymax, zmax);
   Client(host, port).send(message);
 }
 

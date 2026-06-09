@@ -385,6 +385,15 @@ std::uint64_t parse_query_u64(const std::string &query,
   return fallback;
 }
 
+std::uint64_t parse_section_count(const std::string &header,
+                                  const std::string &section) {
+  const auto section_pos = header.find("\"" + section + "\"");
+  if (section_pos == std::string::npos) {
+    return 0;
+  }
+  return parse_json_u64(header.substr(section_pos), "count", 0);
+}
+
 bool recv_more(int fd, std::vector<char> &buffer) {
   char chunk[8192];
   const ssize_t n = ::recv(fd, chunk, sizeof(chunk), 0);
@@ -535,27 +544,20 @@ void respond_monitor_list(int fd) {
          << "\"sequence\":" << snapshot.sequence << ","
          << "\"name\":\"" << json_escape(snapshot.name) << "\","
          << "\"binary_bytes\":" << snapshot.binary_bytes << ","
-         << "\"points\":" << parse_json_u64(snapshot.header, "count", 0)
+         << "\"points\":" << parse_section_count(snapshot.header, "points")
          << ",";
 
     const std::uint64_t quad_count =
-        parse_json_u64(snapshot.header.substr(
-                           snapshot.header.find("\"quads\"") == std::string::npos
-                               ? snapshot.header.size()
-                               : snapshot.header.find("\"quads\"")),
-                       "count", 0);
-    const auto vectors_pos = snapshot.header.find("\"vectors\"");
-    const auto hexas_pos = snapshot.header.find("\"hexas\"");
+        parse_section_count(snapshot.header, "quads");
     const std::uint64_t hexa_count =
-        hexas_pos == std::string::npos
-            ? 0
-            : parse_json_u64(snapshot.header.substr(hexas_pos), "count", 0);
+        parse_section_count(snapshot.header, "hexas");
+    const std::uint64_t aabb_count =
+        parse_section_count(snapshot.header, "aabbs");
     const std::uint64_t vector_count =
-        vectors_pos == std::string::npos
-            ? 0
-            : parse_json_u64(snapshot.header.substr(vectors_pos), "count", 0);
+        parse_section_count(snapshot.header, "vectors");
     body << "\"quads\":" << quad_count << ","
          << "\"hexas\":" << hexa_count << ","
+         << "\"aabbs\":" << aabb_count << ","
          << "\"vectors\":" << vector_count << "}";
   }
   body << "]}\n";

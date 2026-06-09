@@ -33,6 +33,18 @@ int main(int argc, char **argv) {
                     sviz::view(h + 7, 1, 8));
   (void)hex.wire_bytes();
 
+  float xmin[2] = {-0.25f, 1.25f};
+  float ymin[2] = {-0.25f, -0.25f};
+  float zmin[2] = {-0.25f, -0.25f};
+  float xmax[2] = {0.25f, 1.75f};
+  float ymax[2] = {0.25f, 0.25f};
+  float zmax[2] = {0.25f, 0.25f};
+  sviz::Message aabbs("compile-aabbs");
+  aabbs.aabb_soa(sviz::view(xmin, 2), sviz::view(ymin, 2),
+                 sviz::view(zmin, 2), sviz::view(xmax, 2),
+                 sviz::view(ymax, 2), sviz::view(zmax, 2));
+  (void)aabbs.wire_bytes();
+
   std::array<std::array<float, 3>, 4> quad = {
       {{{0.0f, 0.0f, 0.0f}},
        {{1.0f, 0.0f, 0.0f}},
@@ -75,6 +87,7 @@ int main(int argc, char **argv) {
     sviz::Client client(argv[1], std::atoi(argv[2]));
     client.send(mesh);
     client.send(hex);
+    client.send(aabbs);
     client.send(single);
     client.send(quivers);
   }

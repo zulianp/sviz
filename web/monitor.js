@@ -110,6 +110,56 @@ function concatUint32Arrays(a, b) {
   return out;
 }
 
+function concatFloat32Arrays(a, b) {
+  if (!a || a.length === 0) {
+    return b || new Float32Array(0);
+  }
+  if (!b || b.length === 0) {
+    return a;
+  }
+  const out = new Float32Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+function aabbVertices(aabbs) {
+  const vertices = new Float32Array((aabbs.length / 6) * 8 * 3);
+  for (let i = 0, out = 0; i < aabbs.length; i += 6) {
+    const xmin = aabbs[i];
+    const ymin = aabbs[i + 1];
+    const zmin = aabbs[i + 2];
+    const xmax = aabbs[i + 3];
+    const ymax = aabbs[i + 4];
+    const zmax = aabbs[i + 5];
+    const corners = [
+      xmin, ymin, zmin,
+      xmax, ymin, zmin,
+      xmax, ymax, zmin,
+      xmin, ymax, zmin,
+      xmin, ymin, zmax,
+      xmax, ymin, zmax,
+      xmax, ymax, zmax,
+      xmin, ymax, zmax
+    ];
+    vertices.set(corners, out);
+    out += corners.length;
+  }
+  return vertices;
+}
+
+function aabbEdges(aabbCount, vertexOffset) {
+  const pattern = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7];
+  const edges = new Uint32Array(aabbCount * pattern.length);
+  for (let i = 0, out = 0; i < aabbCount; ++i) {
+    const base = vertexOffset + i * 8;
+    for (const local of pattern) {
+      edges[out++] = base + local;
+    }
+  }
+  return edges;
+}
+
 function quadEdges(quads) {
   const edges = [];
   const seen = new Set();
@@ -162,31 +212,43 @@ function bindMonitorSnapshot(buffer, label = 'monitor socket') {
     throw new Error('only little-endian monitor payloads are supported');
   }
 
-  const points = typedPayloadView(Float32Array, bytes, jsonEnd.headerEnd, header.points);
+  const points = header.points
+    ? typedPayloadView(Float32Array, bytes, jsonEnd.headerEnd, header.points)
+    : new Float32Array(0);
   const explicitQuads = header.quads
     ? typedPayloadView(Uint32Array, bytes, jsonEnd.headerEnd, header.quads)
     : new Uint32Array(0);
   const hexas = header.hexas
     ? typedPayloadView(Uint32Array, bytes, jsonEnd.headerEnd, header.hexas)
     : new Uint32Array(0);
+  const aabbs = header.aabbs
+    ? typedPayloadView(Float32Array, bytes, jsonEnd.headerEnd, header.aabbs)
+    : new Float32Array(0);
+  const aabbVerts = aabbVertices(aabbs);
+  const vertices = concatFloat32Arrays(points, aabbVerts);
   const quads = concatUint32Arrays(explicitQuads, hexaBoundaryQuads(hexas));
+  const edges = concatUint32Arrays(
+    quadEdges(quads),
+    aabbEdges(Math.floor(aabbs.length / 6), Math.floor(points.length / 3))
+  );
   const vectors = header.vectors
     ? typedPayloadView(Float32Array, bytes, jsonEnd.headerEnd, header.vectors)
     : null;
   const vectorScale = Number(header.vector_scale || 1);
   viewer.bindRenderMesh({
-    vertices: points,
+    vertices,
     triangles: quadTriangles(quads),
-    edges: quadEdges(quads),
+    edges,
     vectors: vectors ? vectorSegments(vectors, vectorScale) : null
   });
 
   const quadCount = header.quads ? Number(header.quads.count) : 0;
   const hexaCount = header.hexas ? Number(header.hexas.count) : 0;
+  const aabbCount = header.aabbs ? Number(header.aabbs.count) : 0;
   const boundaryQuadCount = Math.floor(quads.length / 4);
   const vectorCount = vectors ? Math.floor(vectors.length / 6) : 0;
   statusEl.textContent =
-    `${points.length / 3} points, ${quadCount} quads, ${hexaCount} hexas, ${boundaryQuadCount} rendered faces, ${vectorCount} vectors from ${label}`;
+    `${points.length / 3} points, ${quadCount} quads, ${hexaCount} hexas, ${aabbCount} AABBs, ${boundaryQuadCount} rendered faces, ${vectorCount} vectors from ${label}`;
 }
 
 async function loadSnapshot(id = null) {
@@ -296,8 +358,9 @@ function renderMessageTree(messages) {
         item.classList.add('active');
       }
       const hexaText = Number(snapshot.hexas) > 0 ? `, ${snapshot.hexas} hexas` : '';
+      const aabbText = Number(snapshot.aabbs) > 0 ? `, ${snapshot.aabbs} AABBs` : '';
       const vectorText = Number(snapshot.vectors) > 0 ? `, ${snapshot.vectors} vectors` : '';
-      item.textContent = `t${snapshot.sequence}: ${snapshot.quads} quads${hexaText}${vectorText}`;
+      item.textContent = `t${snapshot.sequence}: ${snapshot.quads} quads${hexaText}${aabbText}${vectorText}`;
       item.addEventListener('click', () => {
         selectedLatest = false;
         selectedMessageId = Number(snapshot.id);
