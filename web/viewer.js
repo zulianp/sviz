@@ -105,6 +105,19 @@ void main() { gl_FragColor = color; }`;
     };
   }
 
+  clear() {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(0), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.triBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(0), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.edgeBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(0), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vectorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(0), gl.STATIC_DRAW);
+    this.mesh = null;
+  }
+
   setTool(tool) {
     this.activeTool = tool;
   }

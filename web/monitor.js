@@ -4,6 +4,7 @@ const canvas = document.getElementById('view');
 const statusEl = document.getElementById('status');
 const messageTreeEl = document.getElementById('messageTree');
 const refreshMonitorButton = document.getElementById('refreshMonitor');
+const clearMonitorButton = document.getElementById('clearMonitor');
 const rotateModeButton = document.getElementById('rotateMode');
 const panModeButton = document.getElementById('panMode');
 const resetViewButton = document.getElementById('resetView');
@@ -163,6 +164,28 @@ async function refreshMonitor() {
   await refreshMessageList();
 }
 
+async function clearMonitor() {
+  clearMonitorButton.disabled = true;
+  try {
+    const response = await fetch('/monitor-clear', { method: 'POST' });
+    if (!response.ok) {
+      throw new Error(`monitor clear failed with HTTP ${response.status}`);
+    }
+    selectedLatest = true;
+    selectedMessageId = null;
+    messageListVersion = -1;
+    viewer.clear();
+    renderMessageTree([]);
+    statusEl.textContent = 'Monitor messages cleared';
+    await refreshMessageList();
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = err.message;
+  } finally {
+    clearMonitorButton.disabled = false;
+  }
+}
+
 async function fetchMonitorInfo() {
   if (monitorInfo) {
     return monitorInfo;
@@ -278,6 +301,7 @@ function setTool(tool) {
 }
 
 refreshMonitorButton.addEventListener('click', refreshMonitor);
+clearMonitorButton.addEventListener('click', clearMonitor);
 rotateModeButton.addEventListener('click', () => setTool('rotate'));
 panModeButton.addEventListener('click', () => setTool('pan'));
 resetViewButton.addEventListener('click', () => viewer.resetView());

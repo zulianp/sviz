@@ -395,6 +395,12 @@ bool recv_more(int fd, std::vector<char> &buffer) {
   return true;
 }
 
+void clear_monitor_snapshots() {
+  std::lock_guard<std::mutex> lock(g_monitor_mutex);
+  g_monitor_snapshots.clear();
+  ++g_monitor_version;
+}
+
 void handle_monitor_ingest(int fd) {
   try {
     std::vector<char> buffer;
@@ -425,9 +431,7 @@ void handle_monitor_ingest(int fd) {
     }
 
     if (kind == "clear") {
-      std::lock_guard<std::mutex> lock(g_monitor_mutex);
-      g_monitor_snapshots.clear();
-      ++g_monitor_version;
+      clear_monitor_snapshots();
       std::cout << "Monitor snapshots cleared\n";
       ::close(fd);
       return;
@@ -552,7 +556,23 @@ void respond_monitor_list(int fd) {
   respond(fd, 200, "OK", "application/json; charset=utf-8", body.str());
 }
 
+void respond_monitor_clear(int fd) {
+  clear_monitor_snapshots();
+  respond(fd, 200, "OK", "application/json; charset=utf-8",
+          "{\"ok\":true}\n");
+}
+
 void handle_request(int fd, const Request &req) {
+  if (req.path == "/monitor-clear") {
+    if (req.method != "POST" && req.method != "GET") {
+      respond(fd, 405, "Method Not Allowed", "text/plain; charset=utf-8",
+              "method not allowed\n");
+      return;
+    }
+    respond_monitor_clear(fd);
+    return;
+  }
+
   if (req.method != "GET") {
     respond(fd, 405, "Method Not Allowed", "text/plain; charset=utf-8",
             "method not allowed\n");

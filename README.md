@@ -166,4 +166,5 @@ With the default server ports, the same command can be shortened to:
 
 Then open `http://127.0.0.1:8080/monitor` in the browser. The server exposes the
 latest snapshot at `/monitor.bin`, retained snapshots at `/monitor.bin?id=N`,
-and the retained message list at `/monitor-list.json`.
+the retained message list at `/monitor-list.json`, and the browser clear action
+at `POST /monitor-clear`.
