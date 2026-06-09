@@ -20,6 +20,19 @@ int main(int argc, char **argv) {
                      sviz::view(q + 3, 1, 4));
   (void)mesh.wire_bytes();
 
+  float hx[8] = {0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f};
+  float hy[8] = {0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f};
+  float hz[8] = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+  std::uint32_t h[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+  sviz::Message hex("compile-hexa");
+  hex.hexa_mesh_soa(sviz::view(hx, 8), sviz::view(hy, 8),
+                    sviz::view(hz, 8), sviz::view(h, 1, 8),
+                    sviz::view(h + 1, 1, 8), sviz::view(h + 2, 1, 8),
+                    sviz::view(h + 3, 1, 8), sviz::view(h + 4, 1, 8),
+                    sviz::view(h + 5, 1, 8), sviz::view(h + 6, 1, 8),
+                    sviz::view(h + 7, 1, 8));
+  (void)hex.wire_bytes();
+
   std::array<std::array<float, 3>, 4> quad = {
       {{{0.0f, 0.0f, 0.0f}},
        {{1.0f, 0.0f, 0.0f}},
@@ -61,6 +74,7 @@ int main(int argc, char **argv) {
   if (argc == 3) {
     sviz::Client client(argv[1], std::atoi(argv[2]));
     client.send(mesh);
+    client.send(hex);
     client.send(single);
     client.send(quivers);
   }

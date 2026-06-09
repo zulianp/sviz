@@ -545,11 +545,17 @@ void respond_monitor_list(int fd) {
                                : snapshot.header.find("\"quads\"")),
                        "count", 0);
     const auto vectors_pos = snapshot.header.find("\"vectors\"");
+    const auto hexas_pos = snapshot.header.find("\"hexas\"");
+    const std::uint64_t hexa_count =
+        hexas_pos == std::string::npos
+            ? 0
+            : parse_json_u64(snapshot.header.substr(hexas_pos), "count", 0);
     const std::uint64_t vector_count =
         vectors_pos == std::string::npos
             ? 0
             : parse_json_u64(snapshot.header.substr(vectors_pos), "count", 0);
     body << "\"quads\":" << quad_count << ","
+         << "\"hexas\":" << hexa_count << ","
          << "\"vectors\":" << vector_count << "}";
   }
   body << "]}\n";

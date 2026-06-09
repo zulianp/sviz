@@ -277,11 +277,13 @@ public:
     vector_scale_ = other.vector_scale_;
     points_payload_ = other.points_payload_;
     quads_payload_ = other.quads_payload_;
+    hexas_payload_ = other.hexas_payload_;
     vectors_payload_ = other.vectors_payload_;
     payload_cache_ = other.payload_cache_;
     payload_cache_dirty_ = other.payload_cache_dirty_;
     points_ = other.points_;
     quads_ = other.quads_;
+    hexas_ = other.hexas_;
     vectors_ = other.vectors_;
   }
 
@@ -294,11 +296,13 @@ public:
     vector_scale_ = other.vector_scale_;
     points_payload_ = other.points_payload_;
     quads_payload_ = other.quads_payload_;
+    hexas_payload_ = other.hexas_payload_;
     vectors_payload_ = other.vectors_payload_;
     payload_cache_ = other.payload_cache_;
     payload_cache_dirty_ = other.payload_cache_dirty_;
     points_ = other.points_;
     quads_ = other.quads_;
+    hexas_ = other.hexas_;
     vectors_ = other.vectors_;
     return *this;
   }
@@ -309,11 +313,13 @@ public:
     vector_scale_ = other.vector_scale_;
     points_payload_ = std::move(other.points_payload_);
     quads_payload_ = std::move(other.quads_payload_);
+    hexas_payload_ = std::move(other.hexas_payload_);
     vectors_payload_ = std::move(other.vectors_payload_);
     payload_cache_ = std::move(other.payload_cache_);
     payload_cache_dirty_ = other.payload_cache_dirty_;
     points_ = other.points_;
     quads_ = other.quads_;
+    hexas_ = other.hexas_;
     vectors_ = other.vectors_;
   }
 
@@ -326,11 +332,13 @@ public:
     vector_scale_ = other.vector_scale_;
     points_payload_ = std::move(other.points_payload_);
     quads_payload_ = std::move(other.quads_payload_);
+    hexas_payload_ = std::move(other.hexas_payload_);
     vectors_payload_ = std::move(other.vectors_payload_);
     payload_cache_ = std::move(other.payload_cache_);
     payload_cache_dirty_ = other.payload_cache_dirty_;
     points_ = other.points_;
     quads_ = other.quads_;
+    hexas_ = other.hexas_;
     vectors_ = other.vectors_;
     return *this;
   }
@@ -402,6 +410,44 @@ public:
                      view(abcd + 3, quad_count, stride_components));
   }
 
+  template <class A, class B, class C, class D, class E, class F, class G,
+            class H>
+  Message &hexas_soa(ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
+                     ArrayView<D> d, ArrayView<E> e, ArrayView<F> f,
+                     ArrayView<G> g, ArrayView<H> h) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    detail::check_view("hexa a", a.count, a.count, a.data, a.stride);
+    detail::check_view("hexa b", a.count, b.count, b.data, b.stride);
+    detail::check_view("hexa c", a.count, c.count, c.data, c.stride);
+    detail::check_view("hexa d", a.count, d.count, d.data, d.stride);
+    detail::check_view("hexa e", a.count, e.count, e.data, e.stride);
+    detail::check_view("hexa f", a.count, f.count, f.data, f.stride);
+    detail::check_view("hexa g", a.count, g.count, g.data, g.stride);
+    detail::check_view("hexa h", a.count, h.count, h.data, h.stride);
+    append_hexas_soa(a, b, c, d, e, f, g, h, 0);
+    return *this;
+  }
+
+  template <class I>
+  Message &hexas_interleaved(const I *abcdefgh, std::size_t hexa_count,
+                             std::size_t stride_components = 8) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (hexa_count > 0 && abcdefgh == nullptr) {
+      throw Error("interleaved hexa stream has null data");
+    }
+    if (stride_components < 8) {
+      throw Error("interleaved hexa stride must be at least 8 components");
+    }
+    return hexas_soa(view(abcdefgh, hexa_count, stride_components),
+                     view(abcdefgh + 1, hexa_count, stride_components),
+                     view(abcdefgh + 2, hexa_count, stride_components),
+                     view(abcdefgh + 3, hexa_count, stride_components),
+                     view(abcdefgh + 4, hexa_count, stride_components),
+                     view(abcdefgh + 5, hexa_count, stride_components),
+                     view(abcdefgh + 6, hexa_count, stride_components),
+                     view(abcdefgh + 7, hexa_count, stride_components));
+  }
+
   template <class X, class Y, class Z, class A, class B, class C, class D>
   Message &quad_mesh_soa(ArrayView<X> x, ArrayView<Y> y, ArrayView<Z> z,
                          ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
@@ -417,6 +463,27 @@ public:
     return *this;
   }
 
+  template <class X, class Y, class Z, class A, class B, class C, class D,
+            class E, class F, class G, class H>
+  Message &hexa_mesh_soa(ArrayView<X> x, ArrayView<Y> y, ArrayView<Z> z,
+                         ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
+                         ArrayView<D> d, ArrayView<E> e, ArrayView<F> f,
+                         ArrayView<G> g, ArrayView<H> h) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    const std::uint32_t point_base = checked_point_base();
+    points_soa(x, y, z);
+    detail::check_view("hexa a", a.count, a.count, a.data, a.stride);
+    detail::check_view("hexa b", a.count, b.count, b.data, b.stride);
+    detail::check_view("hexa c", a.count, c.count, c.data, c.stride);
+    detail::check_view("hexa d", a.count, d.count, d.data, d.stride);
+    detail::check_view("hexa e", a.count, e.count, e.data, e.stride);
+    detail::check_view("hexa f", a.count, f.count, f.data, f.stride);
+    detail::check_view("hexa g", a.count, g.count, g.data, g.stride);
+    detail::check_view("hexa h", a.count, h.count, h.data, h.stride);
+    append_hexas_soa(a, b, c, d, e, f, g, h, point_base);
+    return *this;
+  }
+
   template <class T, class I>
   Message &quad_mesh_interleaved(const T *xyz, std::size_t point_count,
                                  const I *abcd, std::size_t quad_count,
@@ -425,6 +492,17 @@ public:
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     points_interleaved(xyz, point_count, point_stride_components);
     quads_interleaved(abcd, quad_count, quad_stride_components);
+    return *this;
+  }
+
+  template <class T, class I>
+  Message &hexa_mesh_interleaved(const T *xyz, std::size_t point_count,
+                                 const I *abcdefgh, std::size_t hexa_count,
+                                 std::size_t point_stride_components = 3,
+                                 std::size_t hexa_stride_components = 8) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    points_interleaved(xyz, point_count, point_stride_components);
+    hexas_interleaved(abcdefgh, hexa_count, hexa_stride_components);
     return *this;
   }
 
@@ -455,7 +533,7 @@ public:
     detail::check_view("quiver vz", x.count, vz.count, vz.data, vz.stride);
 
     points_soa(x, y, z);
-    if (!quads_.present) {
+    if (!quads_.present && !hexas_.present) {
       ensure_section(quads_, "quads", "uint32", 4);
     }
     ensure_section(vectors_, "vectors", "float32", 6);
@@ -496,17 +574,20 @@ public:
     if (!points_.present) {
       throw Error("monitor message is missing points");
     }
-    if (!quads_.present) {
-      throw Error("monitor message is missing quads");
+    if (!quads_.present && !hexas_.present) {
+      throw Error("monitor message is missing quads or hexas");
     }
 
     std::ostringstream out;
     detail::Section points = points_;
     detail::Section quads = quads_;
+    detail::Section hexas = hexas_;
     detail::Section vectors = vectors_;
     points.offset = 0;
     quads.offset = points_payload_.size();
-    vectors.offset = points_payload_.size() + quads_payload_.size();
+    hexas.offset = points_payload_.size() + quads_payload_.size();
+    vectors.offset =
+        points_payload_.size() + quads_payload_.size() + hexas_payload_.size();
 
     out << "{\"sviz_protocol\":1"
         << ",\"kind\":\"monitor\""
@@ -515,7 +596,12 @@ public:
         << ",\"binary_bytes\":" << binary_payload_size()
         << ",\"vector_scale\":" << vector_scale_;
     append_section_json(out, points);
-    append_section_json(out, quads);
+    if (quads.present) {
+      append_section_json(out, quads);
+    }
+    if (hexas.present) {
+      append_section_json(out, hexas);
+    }
     if (vectors.present) {
       append_section_json(out, vectors);
     }
@@ -580,14 +666,37 @@ private:
     mark_payload_dirty();
   }
 
+  template <class A, class B, class C, class D, class E, class F, class G,
+            class H>
+  void append_hexas_soa(ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
+                        ArrayView<D> d, ArrayView<E> e, ArrayView<F> f,
+                        ArrayView<G> g, ArrayView<H> h,
+                        std::uint32_t point_base) {
+    ensure_section(hexas_, "hexas", "uint32", 8);
+    for (std::size_t i = 0; i < a.count; ++i) {
+      detail::append_scalar_as_u32(hexas_payload_, a[i], point_base);
+      detail::append_scalar_as_u32(hexas_payload_, b[i], point_base);
+      detail::append_scalar_as_u32(hexas_payload_, c[i], point_base);
+      detail::append_scalar_as_u32(hexas_payload_, d[i], point_base);
+      detail::append_scalar_as_u32(hexas_payload_, e[i], point_base);
+      detail::append_scalar_as_u32(hexas_payload_, f[i], point_base);
+      detail::append_scalar_as_u32(hexas_payload_, g[i], point_base);
+      detail::append_scalar_as_u32(hexas_payload_, h[i], point_base);
+    }
+    hexas_.count += a.count;
+    mark_payload_dirty();
+  }
+
   std::size_t binary_payload_size() const {
     return points_payload_.size() + quads_payload_.size() +
+           hexas_payload_.size() +
            vectors_payload_.size();
   }
 
   void append_binary_payload(std::vector<char> &out) const {
     out.insert(out.end(), points_payload_.begin(), points_payload_.end());
     out.insert(out.end(), quads_payload_.begin(), quads_payload_.end());
+    out.insert(out.end(), hexas_payload_.begin(), hexas_payload_.end());
     out.insert(out.end(), vectors_payload_.begin(), vectors_payload_.end());
   }
 
@@ -606,11 +715,13 @@ private:
   double vector_scale_{1.0};
   std::vector<char> points_payload_;
   std::vector<char> quads_payload_;
+  std::vector<char> hexas_payload_;
   std::vector<char> vectors_payload_;
   mutable std::vector<char> payload_cache_;
   mutable bool payload_cache_dirty_{true};
   detail::Section points_;
   detail::Section quads_;
+  detail::Section hexas_;
   detail::Section vectors_;
   mutable std::recursive_mutex mutex_;
 };
@@ -657,6 +768,19 @@ inline void send_quad_mesh_soa(const std::string &host, int port,
                                ArrayView<B> b, ArrayView<C> c, ArrayView<D> d) {
   Message message(name);
   message.quad_mesh_soa(x, y, z, a, b, c, d);
+  Client(host, port).send(message);
+}
+
+template <class X, class Y, class Z, class A, class B, class C, class D,
+          class E, class F, class G, class H>
+inline void send_hexa_mesh_soa(const std::string &host, int port,
+                               const std::string &name, ArrayView<X> x,
+                               ArrayView<Y> y, ArrayView<Z> z, ArrayView<A> a,
+                               ArrayView<B> b, ArrayView<C> c, ArrayView<D> d,
+                               ArrayView<E> e, ArrayView<F> f, ArrayView<G> g,
+                               ArrayView<H> h) {
+  Message message(name);
+  message.hexa_mesh_soa(x, y, z, a, b, c, d, e, f, g, h);
   Client(host, port).send(message);
 }
 

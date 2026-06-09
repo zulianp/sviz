@@ -69,6 +69,8 @@ Payload sections:
 
 - `points`: `count * 3` float32 values, stored as `x, y, z`.
 - `quads`: `count * 4` uint32 values, stored as node indices `a, b, c, d`.
+- `hexas`: optional `count * 8` uint32 values, stored as HEX8 node indices.
+  The monitor viewer extracts and renders boundary faces.
 - `vectors`: optional `count * 6` float32 values, stored as positioned vectors
   `x, y, z, vx, vy, vz`.
 
@@ -100,6 +102,26 @@ msg.quad_mesh_soa(
 sviz::Client("127.0.0.1", 8081).send(msg);
 ```
 
+Send a HEX8 mesh from SoA streams:
+
+```cpp
+sviz::Message msg("my-hex-mesh");
+msg.hexa_mesh_soa(
+    sviz::view(x, num_points),
+    sviz::view(y, num_points),
+    sviz::view(z, num_points),
+    sviz::view(h0, num_hexas),
+    sviz::view(h1, num_hexas),
+    sviz::view(h2, num_hexas),
+    sviz::view(h3, num_hexas),
+    sviz::view(h4, num_hexas),
+    sviz::view(h5, num_hexas),
+    sviz::view(h6, num_hexas),
+    sviz::view(h7, num_hexas));
+
+sviz::Client("127.0.0.1", 8081).send(msg);
+```
+
 Send quivers from SoA streams:
 
 ```cpp
@@ -126,7 +148,8 @@ sviz::send_clear("127.0.0.1", 8081);
 
 `view(data, count, stride)` also supports strided SoA fields. Interleaved
 helpers are available as `points_interleaved`, `quads_interleaved`,
-`quad_mesh_interleaved`, and `quivers_interleaved`.
+`hexas_interleaved`, `quad_mesh_interleaved`, `hexa_mesh_interleaved`, and
+`quivers_interleaved`.
 
 For SMesh/SFEM surfaces, use the optional adapter instead of creating new
 owning buffers from `data()`:

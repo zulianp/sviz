@@ -64,6 +64,52 @@ function quadTriangles(quads) {
   return triangles;
 }
 
+function hexaBoundaryQuads(hexas) {
+  const faces = new Map();
+  const facePattern = [
+    [0, 3, 2, 1],
+    [4, 5, 6, 7],
+    [0, 1, 5, 4],
+    [1, 2, 6, 5],
+    [2, 3, 7, 6],
+    [3, 0, 4, 7]
+  ];
+
+  for (let h = 0; h < hexas.length; h += 8) {
+    for (const pattern of facePattern) {
+      const face = pattern.map(local => hexas[h + local]);
+      const key = [...face].sort((a, b) => a - b).join(':');
+      const entry = faces.get(key);
+      if (entry) {
+        entry.count += 1;
+      } else {
+        faces.set(key, { count: 1, face });
+      }
+    }
+  }
+
+  const quads = [];
+  for (const entry of faces.values()) {
+    if (entry.count === 1) {
+      quads.push(...entry.face);
+    }
+  }
+  return new Uint32Array(quads);
+}
+
+function concatUint32Arrays(a, b) {
+  if (!a || a.length === 0) {
+    return b || new Uint32Array(0);
+  }
+  if (!b || b.length === 0) {
+    return a;
+  }
+  const out = new Uint32Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
 function quadEdges(quads) {
   const edges = [];
   const seen = new Set();
@@ -117,7 +163,13 @@ function bindMonitorSnapshot(buffer, label = 'monitor socket') {
   }
 
   const points = typedPayloadView(Float32Array, bytes, jsonEnd.headerEnd, header.points);
-  const quads = typedPayloadView(Uint32Array, bytes, jsonEnd.headerEnd, header.quads);
+  const explicitQuads = header.quads
+    ? typedPayloadView(Uint32Array, bytes, jsonEnd.headerEnd, header.quads)
+    : new Uint32Array(0);
+  const hexas = header.hexas
+    ? typedPayloadView(Uint32Array, bytes, jsonEnd.headerEnd, header.hexas)
+    : new Uint32Array(0);
+  const quads = concatUint32Arrays(explicitQuads, hexaBoundaryQuads(hexas));
   const vectors = header.vectors
     ? typedPayloadView(Float32Array, bytes, jsonEnd.headerEnd, header.vectors)
     : null;
@@ -129,9 +181,12 @@ function bindMonitorSnapshot(buffer, label = 'monitor socket') {
     vectors: vectors ? vectorSegments(vectors, vectorScale) : null
   });
 
-  const quadCount = Math.floor(quads.length / 4);
+  const quadCount = header.quads ? Number(header.quads.count) : 0;
+  const hexaCount = header.hexas ? Number(header.hexas.count) : 0;
+  const boundaryQuadCount = Math.floor(quads.length / 4);
   const vectorCount = vectors ? Math.floor(vectors.length / 6) : 0;
-  statusEl.textContent = `${points.length / 3} points, ${quadCount} quads, ${vectorCount} vectors from ${label}`;
+  statusEl.textContent =
+    `${points.length / 3} points, ${quadCount} quads, ${hexaCount} hexas, ${boundaryQuadCount} rendered faces, ${vectorCount} vectors from ${label}`;
 }
 
 async function loadSnapshot(id = null) {
@@ -240,8 +295,9 @@ function renderMessageTree(messages) {
       if (Number(snapshot.id) === selectedMessageId) {
         item.classList.add('active');
       }
+      const hexaText = Number(snapshot.hexas) > 0 ? `, ${snapshot.hexas} hexas` : '';
       const vectorText = Number(snapshot.vectors) > 0 ? `, ${snapshot.vectors} vectors` : '';
-      item.textContent = `t${snapshot.sequence}: ${snapshot.quads} quads${vectorText}`;
+      item.textContent = `t${snapshot.sequence}: ${snapshot.quads} quads${hexaText}${vectorText}`;
       item.addEventListener('click', () => {
         selectedLatest = false;
         selectedMessageId = Number(snapshot.id);
