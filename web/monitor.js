@@ -63,6 +63,9 @@ function quadEdges(quads) {
   const edges = [];
   const seen = new Set();
   function add(a, b) {
+    if (a === b) {
+      return;
+    }
     const lo = Math.min(a, b);
     const hi = Math.max(a, b);
     const key = `${lo}:${hi}`;

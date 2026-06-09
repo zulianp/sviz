@@ -113,6 +113,21 @@ sviz::Client().send(msg);
 helpers are available as `points_interleaved`, `quads_interleaved`,
 `quad_mesh_interleaved`, and `quivers_interleaved`.
 
+For SMesh/SFEM surfaces, use the optional adapter instead of creating new
+owning buffers from `data()`:
+
+```cpp
+#include "sviz_smesh_monitor_client.hpp"
+
+auto surface = smesh::skin(mesh);
+sviz::send_smesh_surface("127.0.0.1", 8081, "contact-surface", surface);
+```
+
+The adapter copies the existing `surface->points()` and `surface->elements()`
+values into the monitor message. It does not call `smesh::manage_host_buffer`
+or `smesh::Buffer::own`, so the original SFEM/SMesh shared buffers remain the
+only owners of their allocations.
+
 Send a single quad:
 
 ```cpp

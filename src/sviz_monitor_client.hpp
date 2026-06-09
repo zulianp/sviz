@@ -25,7 +25,6 @@
 #endif
 
 namespace sviz {
-
 class Error : public std::runtime_error {
 public:
   explicit Error(const std::string &message) : std::runtime_error(message) {}
@@ -37,8 +36,7 @@ template <class T> struct ArrayView {
   std::size_t stride{1};
 
   ArrayView() = default;
-  ArrayView(const T *data_in, std::size_t count_in,
-            std::size_t stride_in = 1)
+  ArrayView(const T *data_in, std::size_t count_in, std::size_t stride_in = 1)
       : data(data_in), count(count_in), stride(stride_in) {}
 
   const T &operator[](std::size_t i) const { return data[i * stride]; }
@@ -82,18 +80,39 @@ inline void append_f32_le(std::vector<char> &out, float value) {
   append_u32_le(out, bits);
 }
 
-template <class T> inline void append_scalar_as_f32(std::vector<char> &out, T v) {
+template <class T>
+inline void append_scalar_as_f32(std::vector<char> &out, T v) {
   append_f32_le(out, static_cast<float>(v));
 }
 
 template <class T>
-inline void append_scalar_as_u32(std::vector<char> &out, T v) {
-  if (v < 0 ||
-      static_cast<unsigned long long>(v) >
-          static_cast<unsigned long long>(std::numeric_limits<std::uint32_t>::max())) {
+inline std::uint32_t checked_u32(T v) {
+  if constexpr (std::numeric_limits<T>::is_signed) {
+    if (v < 0) {
+      throw Error("quad index does not fit in uint32");
+    }
+  }
+  if (static_cast<unsigned long long>(v) >
+      static_cast<unsigned long long>(
+          std::numeric_limits<std::uint32_t>::max())) {
     throw Error("quad index does not fit in uint32");
   }
-  append_u32_le(out, static_cast<std::uint32_t>(v));
+  return static_cast<std::uint32_t>(v);
+}
+
+template <class T>
+inline void append_scalar_as_u32(std::vector<char> &out, T v) {
+  append_u32_le(out, checked_u32(v));
+}
+
+template <class T>
+inline void append_scalar_as_u32(std::vector<char> &out, T v,
+                                 std::uint32_t base) {
+  const std::uint32_t index = checked_u32(v);
+  if (index > std::numeric_limits<std::uint32_t>::max() - base) {
+    throw Error("quad index does not fit in uint32");
+  }
+  append_u32_le(out, index + base);
 }
 
 inline std::string json_escape(const std::string &value) {
@@ -261,14 +280,15 @@ public:
     detail::check_view("point x", x.count, x.count, x.data, x.stride);
     detail::check_view("point y", x.count, y.count, y.data, y.stride);
     detail::check_view("point z", x.count, z.count, z.data, z.stride);
-    require_section_absent(points_, "points");
+    ensure_section(points_, "points", "float32", 3);
 
-    points_ = add_section("points", "float32", 3, x.count);
     for (std::size_t i = 0; i < x.count; ++i) {
-      detail::append_scalar_as_f32(payload_, x[i]);
-      detail::append_scalar_as_f32(payload_, y[i]);
-      detail::append_scalar_as_f32(payload_, z[i]);
+      detail::append_scalar_as_f32(points_payload_, x[i]);
+      detail::append_scalar_as_f32(points_payload_, y[i]);
+      detail::append_scalar_as_f32(points_payload_, z[i]);
     }
+    points_.count += x.count;
+    mark_payload_dirty();
     return *this;
   }
 
@@ -293,15 +313,7 @@ public:
     detail::check_view("quad b", a.count, b.count, b.data, b.stride);
     detail::check_view("quad c", a.count, c.count, c.data, c.stride);
     detail::check_view("quad d", a.count, d.count, d.data, d.stride);
-    require_section_absent(quads_, "quads");
-
-    quads_ = add_section("quads", "uint32", 4, a.count);
-    for (std::size_t i = 0; i < a.count; ++i) {
-      detail::append_scalar_as_u32(payload_, a[i]);
-      detail::append_scalar_as_u32(payload_, b[i]);
-      detail::append_scalar_as_u32(payload_, c[i]);
-      detail::append_scalar_as_u32(payload_, d[i]);
-    }
+    append_quads_soa(a, b, c, d, 0);
     return *this;
   }
 
@@ -324,8 +336,13 @@ public:
   Message &quad_mesh_soa(ArrayView<X> x, ArrayView<Y> y, ArrayView<Z> z,
                          ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
                          ArrayView<D> d) {
+    const std::uint32_t point_base = checked_point_base();
     points_soa(x, y, z);
-    quads_soa(a, b, c, d);
+    detail::check_view("quad a", a.count, a.count, a.data, a.stride);
+    detail::check_view("quad b", a.count, b.count, b.data, b.stride);
+    detail::check_view("quad c", a.count, c.count, c.data, c.stride);
+    detail::check_view("quad d", a.count, d.count, d.data, d.stride);
+    append_quads_soa(a, b, c, d, point_base);
     return *this;
   }
 
@@ -363,23 +380,22 @@ public:
     detail::check_view("quiver vy", x.count, vy.count, vy.data, vy.stride);
     detail::check_view("quiver vz", x.count, vz.count, vz.data, vz.stride);
 
-    if (!points_.present) {
-      points_soa(x, y, z);
-    }
+    points_soa(x, y, z);
     if (!quads_.present) {
-      quads_ = add_section("quads", "uint32", 4, 0);
+      ensure_section(quads_, "quads", "uint32", 4);
     }
-    require_section_absent(vectors_, "vectors");
+    ensure_section(vectors_, "vectors", "float32", 6);
 
-    vectors_ = add_section("vectors", "float32", 6, x.count);
     for (std::size_t i = 0; i < x.count; ++i) {
-      detail::append_scalar_as_f32(payload_, x[i]);
-      detail::append_scalar_as_f32(payload_, y[i]);
-      detail::append_scalar_as_f32(payload_, z[i]);
-      detail::append_scalar_as_f32(payload_, vx[i]);
-      detail::append_scalar_as_f32(payload_, vy[i]);
-      detail::append_scalar_as_f32(payload_, vz[i]);
+      detail::append_scalar_as_f32(vectors_payload_, x[i]);
+      detail::append_scalar_as_f32(vectors_payload_, y[i]);
+      detail::append_scalar_as_f32(vectors_payload_, z[i]);
+      detail::append_scalar_as_f32(vectors_payload_, vx[i]);
+      detail::append_scalar_as_f32(vectors_payload_, vy[i]);
+      detail::append_scalar_as_f32(vectors_payload_, vz[i]);
     }
+    vectors_.count += x.count;
+    mark_payload_dirty();
     return *this;
   }
 
@@ -409,16 +425,23 @@ public:
     }
 
     std::ostringstream out;
+    detail::Section points = points_;
+    detail::Section quads = quads_;
+    detail::Section vectors = vectors_;
+    points.offset = 0;
+    quads.offset = points_payload_.size();
+    vectors.offset = points_payload_.size() + quads_payload_.size();
+
     out << "{\"sviz_protocol\":1"
         << ",\"kind\":\"monitor\""
         << ",\"name\":\"" << detail::json_escape(name_) << "\""
         << ",\"endianness\":\"little\""
-        << ",\"binary_bytes\":" << payload_.size()
+        << ",\"binary_bytes\":" << binary_payload_size()
         << ",\"vector_scale\":" << vector_scale_;
-    append_section_json(out, points_);
-    append_section_json(out, quads_);
-    if (vectors_.present) {
-      append_section_json(out, vectors_);
+    append_section_json(out, points);
+    append_section_json(out, quads);
+    if (vectors.present) {
+      append_section_json(out, vectors);
     }
     out << "}";
     return out.str();
@@ -428,46 +451,86 @@ public:
     std::string header = header_json();
     header.push_back('\n');
     std::vector<char> bytes;
-    bytes.reserve(header.size() + payload_.size());
+    bytes.reserve(header.size() + binary_payload_size());
     bytes.insert(bytes.end(), header.begin(), header.end());
-    bytes.insert(bytes.end(), payload_.begin(), payload_.end());
+    append_binary_payload(bytes);
     return bytes;
   }
 
-  const std::vector<char> &payload() const { return payload_; }
+  const std::vector<char> &payload() const {
+    if (payload_cache_dirty_) {
+      payload_cache_.clear();
+      payload_cache_.reserve(binary_payload_size());
+      append_binary_payload(payload_cache_);
+      payload_cache_dirty_ = false;
+    }
+    return payload_cache_;
+  }
 
 private:
-  detail::Section add_section(const char *name, const char *dtype,
-                              std::uint32_t components, std::size_t count) {
-    detail::Section section;
-    section.name = name;
-    section.dtype = dtype;
-    section.components = components;
-    section.count = count;
-    section.offset = payload_.size();
-    section.present = true;
-    return section;
-  }
-
-  static void require_section_absent(const detail::Section &section,
-                                     const char *name) {
-    if (section.present) {
-      throw Error(std::string(name) + " section is already present");
+  static void ensure_section(detail::Section &section, const char *name,
+                             const char *dtype, std::uint32_t components) {
+    if (!section.present) {
+      section.name = name;
+      section.dtype = dtype;
+      section.components = components;
+      section.count = 0;
+      section.offset = 0;
+      section.present = true;
     }
   }
+
+  std::uint32_t checked_point_base() const {
+    if (points_.count >
+        static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+      throw Error("point count does not fit in uint32");
+    }
+    return static_cast<std::uint32_t>(points_.count);
+  }
+
+  template <class A, class B, class C, class D>
+  void append_quads_soa(ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
+                        ArrayView<D> d, std::uint32_t point_base) {
+    ensure_section(quads_, "quads", "uint32", 4);
+    for (std::size_t i = 0; i < a.count; ++i) {
+      detail::append_scalar_as_u32(quads_payload_, a[i], point_base);
+      detail::append_scalar_as_u32(quads_payload_, b[i], point_base);
+      detail::append_scalar_as_u32(quads_payload_, c[i], point_base);
+      detail::append_scalar_as_u32(quads_payload_, d[i], point_base);
+    }
+    quads_.count += a.count;
+    mark_payload_dirty();
+  }
+
+  std::size_t binary_payload_size() const {
+    return points_payload_.size() + quads_payload_.size() +
+           vectors_payload_.size();
+  }
+
+  void append_binary_payload(std::vector<char> &out) const {
+    out.insert(out.end(), points_payload_.begin(), points_payload_.end());
+    out.insert(out.end(), quads_payload_.begin(), quads_payload_.end());
+    out.insert(out.end(), vectors_payload_.begin(), vectors_payload_.end());
+  }
+
+  void mark_payload_dirty() const { payload_cache_dirty_ = true; }
 
   static void append_section_json(std::ostringstream &out,
                                   const detail::Section &section) {
     out << ",\"" << section.name << "\":{"
         << "\"dtype\":\"" << section.dtype << "\""
         << ",\"components\":" << section.components
-        << ",\"count\":" << section.count
-        << ",\"offset\":" << section.offset << "}";
+        << ",\"count\":" << section.count << ",\"offset\":" << section.offset
+        << "}";
   }
 
   std::string name_;
   double vector_scale_{1.0};
-  std::vector<char> payload_;
+  std::vector<char> points_payload_;
+  std::vector<char> quads_payload_;
+  std::vector<char> vectors_payload_;
+  mutable std::vector<char> payload_cache_;
+  mutable bool payload_cache_dirty_{true};
   detail::Section points_;
   detail::Section quads_;
   detail::Section vectors_;
@@ -499,8 +562,7 @@ template <class X, class Y, class Z, class A, class B, class C, class D>
 inline void send_quad_mesh_soa(const std::string &host, int port,
                                const std::string &name, ArrayView<X> x,
                                ArrayView<Y> y, ArrayView<Z> z, ArrayView<A> a,
-                               ArrayView<B> b, ArrayView<C> c,
-                               ArrayView<D> d) {
+                               ArrayView<B> b, ArrayView<C> c, ArrayView<D> d) {
   Message message(name);
   message.quad_mesh_soa(x, y, z, a, b, c, d);
   Client(host, port).send(message);
