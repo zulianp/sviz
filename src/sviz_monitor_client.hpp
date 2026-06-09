@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -270,13 +271,79 @@ public:
   explicit Message(std::string name = "sviz-monitor")
       : name_(std::move(name)) {}
 
+  Message(const Message &other) {
+    std::lock_guard<std::recursive_mutex> lock(other.mutex_);
+    name_ = other.name_;
+    vector_scale_ = other.vector_scale_;
+    points_payload_ = other.points_payload_;
+    quads_payload_ = other.quads_payload_;
+    vectors_payload_ = other.vectors_payload_;
+    payload_cache_ = other.payload_cache_;
+    payload_cache_dirty_ = other.payload_cache_dirty_;
+    points_ = other.points_;
+    quads_ = other.quads_;
+    vectors_ = other.vectors_;
+  }
+
+  Message &operator=(const Message &other) {
+    if (this == &other) {
+      return *this;
+    }
+    std::scoped_lock lock(mutex_, other.mutex_);
+    name_ = other.name_;
+    vector_scale_ = other.vector_scale_;
+    points_payload_ = other.points_payload_;
+    quads_payload_ = other.quads_payload_;
+    vectors_payload_ = other.vectors_payload_;
+    payload_cache_ = other.payload_cache_;
+    payload_cache_dirty_ = other.payload_cache_dirty_;
+    points_ = other.points_;
+    quads_ = other.quads_;
+    vectors_ = other.vectors_;
+    return *this;
+  }
+
+  Message(Message &&other) {
+    std::lock_guard<std::recursive_mutex> lock(other.mutex_);
+    name_ = std::move(other.name_);
+    vector_scale_ = other.vector_scale_;
+    points_payload_ = std::move(other.points_payload_);
+    quads_payload_ = std::move(other.quads_payload_);
+    vectors_payload_ = std::move(other.vectors_payload_);
+    payload_cache_ = std::move(other.payload_cache_);
+    payload_cache_dirty_ = other.payload_cache_dirty_;
+    points_ = other.points_;
+    quads_ = other.quads_;
+    vectors_ = other.vectors_;
+  }
+
+  Message &operator=(Message &&other) {
+    if (this == &other) {
+      return *this;
+    }
+    std::scoped_lock lock(mutex_, other.mutex_);
+    name_ = std::move(other.name_);
+    vector_scale_ = other.vector_scale_;
+    points_payload_ = std::move(other.points_payload_);
+    quads_payload_ = std::move(other.quads_payload_);
+    vectors_payload_ = std::move(other.vectors_payload_);
+    payload_cache_ = std::move(other.payload_cache_);
+    payload_cache_dirty_ = other.payload_cache_dirty_;
+    points_ = other.points_;
+    quads_ = other.quads_;
+    vectors_ = other.vectors_;
+    return *this;
+  }
+
   Message &set_vector_scale(double scale) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     vector_scale_ = scale;
     return *this;
   }
 
   template <class X, class Y, class Z>
   Message &points_soa(ArrayView<X> x, ArrayView<Y> y, ArrayView<Z> z) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     detail::check_view("point x", x.count, x.count, x.data, x.stride);
     detail::check_view("point y", x.count, y.count, y.data, y.stride);
     detail::check_view("point z", x.count, z.count, z.data, z.stride);
@@ -295,6 +362,7 @@ public:
   template <class T>
   Message &points_interleaved(const T *xyz, std::size_t point_count,
                               std::size_t stride_components = 3) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (point_count > 0 && xyz == nullptr) {
       throw Error("interleaved point stream has null data");
     }
@@ -309,6 +377,7 @@ public:
   template <class A, class B, class C, class D>
   Message &quads_soa(ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
                      ArrayView<D> d) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     detail::check_view("quad a", a.count, a.count, a.data, a.stride);
     detail::check_view("quad b", a.count, b.count, b.data, b.stride);
     detail::check_view("quad c", a.count, c.count, c.data, c.stride);
@@ -320,6 +389,7 @@ public:
   template <class I>
   Message &quads_interleaved(const I *abcd, std::size_t quad_count,
                              std::size_t stride_components = 4) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (quad_count > 0 && abcd == nullptr) {
       throw Error("interleaved quad stream has null data");
     }
@@ -336,6 +406,7 @@ public:
   Message &quad_mesh_soa(ArrayView<X> x, ArrayView<Y> y, ArrayView<Z> z,
                          ArrayView<A> a, ArrayView<B> b, ArrayView<C> c,
                          ArrayView<D> d) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     const std::uint32_t point_base = checked_point_base();
     points_soa(x, y, z);
     detail::check_view("quad a", a.count, a.count, a.data, a.stride);
@@ -351,6 +422,7 @@ public:
                                  const I *abcd, std::size_t quad_count,
                                  std::size_t point_stride_components = 3,
                                  std::size_t quad_stride_components = 4) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     points_interleaved(xyz, point_count, point_stride_components);
     quads_interleaved(abcd, quad_count, quad_stride_components);
     return *this;
@@ -358,6 +430,7 @@ public:
 
   template <class T>
   Message &single_quad(const std::array<std::array<T, 3>, 4> &vertices) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     const T x[4] = {vertices[0][0], vertices[1][0], vertices[2][0],
                     vertices[3][0]};
     const T y[4] = {vertices[0][1], vertices[1][1], vertices[2][1],
@@ -373,6 +446,7 @@ public:
   template <class X, class Y, class Z, class VX, class VY, class VZ>
   Message &quivers_soa(ArrayView<X> x, ArrayView<Y> y, ArrayView<Z> z,
                        ArrayView<VX> vx, ArrayView<VY> vy, ArrayView<VZ> vz) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     detail::check_view("quiver x", x.count, x.count, x.data, x.stride);
     detail::check_view("quiver y", x.count, y.count, y.data, y.stride);
     detail::check_view("quiver z", x.count, z.count, z.data, z.stride);
@@ -402,6 +476,7 @@ public:
   template <class T>
   Message &quivers_interleaved(const T *xyz_vxyz, std::size_t vector_count,
                                std::size_t stride_components = 6) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (vector_count > 0 && xyz_vxyz == nullptr) {
       throw Error("interleaved quiver stream has null data");
     }
@@ -417,6 +492,7 @@ public:
   }
 
   std::string header_json() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!points_.present) {
       throw Error("monitor message is missing points");
     }
@@ -448,6 +524,7 @@ public:
   }
 
   std::vector<char> wire_bytes() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::string header = header_json();
     header.push_back('\n');
     std::vector<char> bytes;
@@ -458,6 +535,7 @@ public:
   }
 
   const std::vector<char> &payload() const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (payload_cache_dirty_) {
       payload_cache_.clear();
       payload_cache_.reserve(binary_payload_size());
@@ -534,6 +612,7 @@ private:
   detail::Section points_;
   detail::Section quads_;
   detail::Section vectors_;
+  mutable std::recursive_mutex mutex_;
 };
 
 class Client {

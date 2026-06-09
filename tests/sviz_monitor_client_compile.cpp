@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdlib>
 #include <cstdint>
+#include <thread>
+#include <vector>
 
 int main(int argc, char **argv) {
   float x[4] = {0.0f, 1.0f, 1.0f, 0.0f};
@@ -35,6 +37,25 @@ int main(int argc, char **argv) {
       .quivers_soa(sviz::view(x, 4), sviz::view(y, 4),
                    sviz::view(z, 4), sviz::view(vx, 4),
                    sviz::view(vy, 4), sviz::view(vz, 4));
+  (void)quivers.wire_bytes();
+
+  std::vector<std::thread> workers;
+  for (int t = 0; t < 4; ++t) {
+    workers.emplace_back([&quivers, t]() {
+      for (int i = 0; i < 100; ++i) {
+        const float p[3] = {static_cast<float>(t), static_cast<float>(i),
+                            0.0f};
+        const float v[3] = {1.0f, 0.0f, 0.0f};
+        quivers.set_vector_scale(0.1)
+            .quivers_soa(sviz::view(p, 1), sviz::view(p + 1, 1),
+                         sviz::view(p + 2, 1), sviz::view(v, 1),
+                         sviz::view(v + 1, 1), sviz::view(v + 2, 1));
+      }
+    });
+  }
+  for (auto &worker : workers) {
+    worker.join();
+  }
   (void)quivers.wire_bytes();
 
   if (argc == 3) {
